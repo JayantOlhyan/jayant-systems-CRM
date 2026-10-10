@@ -157,7 +157,21 @@ export function buildDefaultLocalBrowserDB(): LocalWorkspaceDB {
     notes: [],
     activities: [],
     attachments: [],
-    references: [],
+    references: [
+      {
+        id: "ref_user_design_inspiration_1",
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        title: "Jayant CRM — Primary UI & Workspace Design Inspiration",
+        url: "/inspirations/jayant-crm-design-inspiration.png",
+        screenshotUrl: "/inspirations/jayant-crm-design-inspiration.png",
+        category: "Design Inspiration",
+        description:
+          "Saved design inspiration reference uploaded by user for JAYANT CRM layout, typography, centered lead cards, and dark-mode density.",
+        tags: ["Design Inspiration", "CRM UI", "Saved Screenshot"],
+        organizationId: null,
+        createdAt: nowIso,
+      },
+    ],
     contentIdeas: [],
     importBatches: [],
     sourceRecords: [],
@@ -202,6 +216,26 @@ export function loadLocalBrowserDB(): LocalWorkspaceDB {
     if (raw) {
       const parsed = JSON.parse(raw) as LocalWorkspaceDB;
       if (parsed && Array.isArray(parsed.organizations) && Array.isArray(parsed.collections)) {
+        if (!Array.isArray(parsed.references)) parsed.references = [];
+        const hasUserDesignInspiration = parsed.references.some(
+          (r) => r.id === "ref_user_design_inspiration_1"
+        );
+        if (!hasUserDesignInspiration) {
+          parsed.references.unshift({
+            id: "ref_user_design_inspiration_1",
+            workspaceId: DEFAULT_WORKSPACE_ID,
+            title: "Jayant CRM — Primary UI & Workspace Design Inspiration",
+            url: "/inspirations/jayant-crm-design-inspiration.png",
+            screenshotUrl: "/inspirations/jayant-crm-design-inspiration.png",
+            category: "Design Inspiration",
+            description:
+              "Saved design inspiration reference uploaded by user for JAYANT CRM layout, typography, centered lead cards, and dark-mode density.",
+            tags: ["Design Inspiration", "CRM UI", "Saved Screenshot"],
+            organizationId: null,
+            createdAt: new Date().toISOString(),
+          });
+          saveLocalBrowserDB(parsed);
+        }
         return parsed;
       }
     }
@@ -1664,6 +1698,134 @@ export function installLocalBrowserStorageInterceptor(): void {
             return jsonResponse({ ok: true, id: newId });
           }
 
+          case "delete_reference": {
+            state.references = state.references.filter((r) => r.id !== payload.id);
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "toggle_bookmark_inspiration": {
+            const orgId = payload.organizationId;
+            const org = state.organizations.find((o) => o.id === orgId);
+            if (!org) return jsonResponse({ error: "Lead not found" }, 404);
+            const existingRefIdx = state.references.findIndex(
+              (r) => r.organizationId === orgId && r.category === "Design Inspiration"
+            );
+            if (existingRefIdx !== -1) {
+              state.references.splice(existingRefIdx, 1);
+              org.isBookmarked = false;
+              org.updatedAt = nowIso;
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, isBookmarked: false });
+            } else {
+              const newRefId = uid("ref");
+              const targetUrl = org.websiteUrl
+                ? org.websiteUrl.startsWith("http")
+                  ? org.websiteUrl
+                  : `https://${org.websiteUrl}`
+                : org.sourceUrl || `https://${org.normalizedDomain || "example.com"}`;
+              state.references.unshift({
+                id: newRefId,
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                title: `${org.name} — Bookmarked Website & Design Inspiration`,
+                url: targetUrl,
+                screenshotUrl: payload.screenshotUrl || null,
+                category: "Design Inspiration",
+                description:
+                  org.observedFacts ||
+                  `Bookmarked website inspiration from ${org.name} (${org.industry || "General"}, ${org.country || "Global"}).`,
+                tags: ["Bookmarked Website", org.industry || "Inspiration"].filter(Boolean),
+                organizationId: org.id,
+                createdAt: nowIso,
+              });
+              org.isBookmarked = true;
+              org.updatedAt = nowIso;
+              state.activities.unshift({
+                id: uid("act"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                organizationId: org.id,
+                actorOrigin: "user",
+                activityType: "bookmarked_inspiration",
+                title: `Bookmarked ${org.name} website to Design Inspirations`,
+                createdAt: nowIso,
+              });
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, isBookmarked: true, referenceId: newRefId });
+            }
+          }
+
+          case "record_message_operation": {
+            const orgId = payload.organizationId;
+            const org = state.organizations.find((o) => o.id === orgId);
+            if (!org) return jsonResponse({ error: "Lead not found" }, 404);
+            const messageStatus = payload.messageStatus || "message_sent";
+            const channel = payload.channel || "Outreach Message";
+            const note = payload.note ? String(payload.note).trim() : null;
+
+            org.messageStatus = messageStatus;
+            org.lastMessageChannel = channel;
+            if (messageStatus !== "not_messaged") {
+              org.lastMessagedAt = nowIso;
+              org.lastContactedAt = nowIso;
+            }
+            if (note) {
+              org.lastMessageNote = note;
+            }
+
+            if (messageStatus === "message_sent" || messageStatus === "followup_sent") {
+              if (!org.primaryStageId || org.primaryStageId === "stg_new" || org.primaryStageId === "stg_researching" || org.primaryStageId === "stg_qualified") {
+                org.primaryStageId = "stg_contacted";
+              }
+              org.nextAction =
+                messageStatus === "message_sent"
+                  ? "Follow up on sent message"
+                  : "Await prospect reply";
+            } else if (messageStatus === "replied") {
+              org.primaryStageId = "stg_replied";
+              org.nextAction = "Schedule discovery call / send proposal";
+            }
+            org.updatedAt = nowIso;
+
+            const statusLabels: Record<string, string> = {
+              not_messaged: "Reset message status to Not Messaged",
+              message_sent: `Message sent via ${channel}`,
+              followup_sent: `Follow-up message sent via ${channel}`,
+              replied: `Prospect replied via ${channel}`,
+            };
+
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: org.id,
+              actorOrigin: "user",
+              activityType: "outreach_message",
+              title: statusLabels[messageStatus] || `Message operation: ${messageStatus}`,
+              description: note || `Outreach status updated for ${org.name}`,
+              createdAt: nowIso,
+            });
+
+            if (note) {
+              state.notes.unshift({
+                id: uid("note"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                organizationId: org.id,
+                content: `[${channel}] ${note}`,
+                isPinned: false,
+                origin: "user",
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+            }
+
+            saveLocalBrowserDB(state);
+            return jsonResponse({
+              ok: true,
+              messageStatus: org.messageStatus,
+              lastMessagedAt: org.lastMessagedAt,
+              primaryStageId: org.primaryStageId,
+            });
+          }
+
           case "upsert_content_idea": {
             if (payload.id) {
               const idx = state.contentIdeas.findIndex((c) => c.id === payload.id);
@@ -1865,6 +2027,17 @@ export function installLocalBrowserStorageInterceptor(): void {
           });
         }
 
+        if (mode === "quick_import") {
+          const primaryLeadSheet =
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            inspection.sheets?.find((s: any) => s.sheetRole === "leads") ||
+            inspection.sheets?.[0];
+          if (primaryLeadSheet) {
+            selectedSheet = primaryLeadSheet.name;
+            mapping = primaryLeadSheet.suggestedMapping || {};
+          }
+        }
+
         const preview = previewLocalSpreadsheetImport(
           state,
           sheetRowsMap,
@@ -1877,7 +2050,7 @@ export function installLocalBrowserStorageInterceptor(): void {
           return jsonResponse({ ok: true, preview });
         }
 
-        if (mode === "execute") {
+        if (mode === "execute" || mode === "quick_import") {
           const nowIso = new Date().toISOString();
           const newBatchId = uid("imp");
           let newRecordsCreated = 0;
