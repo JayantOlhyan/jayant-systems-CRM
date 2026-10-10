@@ -52,6 +52,12 @@ import {
   ContactsAndSuppressionView,
   AnalyticsAndActivityView,
 } from "./WorkflowAndLibraryViews";
+import {
+  installLocalBrowserStorageInterceptor,
+  getLocalBrowserStorageStats,
+  triggerLocalBrowserFileDownload,
+  LOCAL_STORAGE_DB_KEY,
+} from "@/lib/browser-storage";
 
 export type NavSection =
   | "dashboard"
@@ -125,6 +131,14 @@ export function CrmWorkspaceShell({
   const [wsName, setWsName] = useState("Jayant Web & AI Systems");
   const [wsCurrency, setWsCurrency] = useState("INR");
   const [wsTimezone, setWsTimezone] = useState("Asia/Kolkata");
+  const [storageStats, setStorageStats] = useState({
+    leadCount: 200,
+    collectionCount: 5,
+    taskCount: 3,
+    opportunityCount: 0,
+    sizeKB: 0,
+    lastSavedAt: "",
+  });
 
   const notify = useCallback(
     (message: string, tone: "success" | "error" | "info" = "info") => {
@@ -139,10 +153,12 @@ export function CrmWorkspaceShell({
 
   const loadWorkspace = useCallback(async () => {
     try {
+      installLocalBrowserStorageInterceptor();
       const res = await fetch("/api/workspace");
       if (res.ok) {
         const json = await res.json();
         setData(json);
+        setStorageStats(getLocalBrowserStorageStats());
         if (json.workspace) {
           setWsName(json.workspace.name || "Jayant Web & AI Systems");
           setWsCurrency(json.workspace.defaultCurrency || "INR");
@@ -155,7 +171,11 @@ export function CrmWorkspaceShell({
   }, []);
 
   useEffect(() => {
+    installLocalBrowserStorageInterceptor();
     loadWorkspace();
+    const onStorageUpdate = () => setStorageStats(getLocalBrowserStorageStats());
+    window.addEventListener("jayant-crm-local-storage-updated", onStorageUpdate);
+    return () => window.removeEventListener("jayant-crm-local-storage-updated", onStorageUpdate);
   }, [loadWorkspace]);
 
   useEffect(() => {
@@ -650,6 +670,18 @@ export function CrmWorkspaceShell({
           </button>
 
           <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => setActiveNav("settings")}
+              title={`All CRM data & analytics run on your Local Browser Storage (${LOCAL_STORAGE_DB_KEY})`}
+              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-status-success/10 border border-status-success/30 text-[11px] font-mono text-status-success hover:bg-status-success/20 transition"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>
+                Browser Storage: {storageStats.leadCount} Leads ({storageStats.sizeKB} KB)
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() => setActiveNav("imports")}
@@ -1350,13 +1382,49 @@ export function CrmWorkspaceShell({
               </div>
 
               <div className="bg-app-surface border border-app-border rounded-xl p-5 space-y-4">
-                <h2 className="text-sm font-heading font-semibold text-text-primary">
-                  Database &amp; Seed Controls (Section 38)
-                </h2>
-                <p className="text-xs text-text-secondary">
-                  Reset the workspace to an empty state (0 leads) to test fresh spreadsheet imports from scratch, or re-import the 200-lead Global E-Commerce Lead Ledger.
-                </p>
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-sm font-heading font-semibold text-text-primary flex items-center gap-2">
+                      <Database className="w-4 h-4 text-status-success" />
+                      Local Browser Storage Engine (`localStorage` + `IndexedDB`)
+                    </h2>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      100% of your leads, collections, custom fields, scores, notes, tasks, opportunities, spreadsheet imports, and analytics run and persist directly in your local browser storage (`{LOCAL_STORAGE_DB_KEY}`).
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-status-success/15 text-status-success font-mono text-[11px] font-semibold">
+                    Active • {storageStats.sizeKB} KB Used
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3 rounded-lg bg-app-secondary border border-app-border">
+                    <span className="text-text-muted block">Stored Leads</span>
+                    <strong className="font-mono text-base text-text-primary">
+                      {storageStats.leadCount}
+                    </strong>
+                  </div>
+                  <div className="p-3 rounded-lg bg-app-secondary border border-app-border">
+                    <span className="text-text-muted block">Collections</span>
+                    <strong className="font-mono text-base text-text-primary">
+                      {storageStats.collectionCount}
+                    </strong>
+                  </div>
+                  <div className="p-3 rounded-lg bg-app-secondary border border-app-border">
+                    <span className="text-text-muted block">Tasks &amp; Follow-ups</span>
+                    <strong className="font-mono text-base text-text-primary">
+                      {storageStats.taskCount}
+                    </strong>
+                  </div>
+                  <div className="p-3 rounded-lg bg-app-secondary border border-app-border">
+                    <span className="text-text-muted block">Opportunities</span>
+                    <strong className="font-mono text-base text-text-primary">
+                      {storageStats.opportunityCount}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3 pt-2">
                   <button
                     type="button"
                     onClick={async () => {
@@ -1366,11 +1434,11 @@ export function CrmWorkspaceShell({
                         body: JSON.stringify({ action: "reseed_workspace" }),
                       });
                       await loadWorkspace();
-                      notify("Verified 200-lead Global E-Commerce Ledger loaded", "success");
+                      notify("Loaded 200-lead Global E-Commerce Ledger into Local Browser Storage", "success");
                     }}
                     className="px-4 py-2 rounded-lg bg-status-success/15 text-status-success border border-status-success/30 text-xs font-semibold"
                   >
-                    Ensure 200-Lead Global E-Commerce Ledger Imported
+                    Reload Default 200-Lead Global E-Commerce Ledger
                   </button>
 
                   <button
@@ -1382,19 +1450,55 @@ export function CrmWorkspaceShell({
                         body: JSON.stringify({ action: "reset_to_empty_workspace" }),
                       });
                       await loadWorkspace();
-                      notify("Workspace reset to 0 leads", "info");
+                      notify("Local Browser Storage reset to 0 leads", "info");
                     }}
                     className="px-4 py-2 rounded-lg bg-status-error/15 text-status-error border border-status-error/30 text-xs font-semibold"
                   >
-                    Reset to Empty Database (0 Leads)
+                    Clear Browser Storage (0 Leads)
                   </button>
 
-                  <a
-                    href="/api/export?format=workspace_backup_json"
-                    className="px-4 py-2 rounded-lg bg-app-secondary border border-app-border text-text-primary text-xs font-medium"
+                  <button
+                    type="button"
+                    onClick={() => triggerLocalBrowserFileDownload("workspace_backup_json")}
+                    className="px-4 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-primary text-xs font-medium inline-flex items-center gap-1.5"
                   >
-                    Download Full JSON Backup
-                  </a>
+                    <Download className="w-3.5 h-3.5 text-accent" />
+                    Export Browser Storage (.JSON)
+                  </button>
+
+                  <label className="px-4 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-primary text-xs font-medium inline-flex items-center gap-1.5 cursor-pointer">
+                    <Upload className="w-3.5 h-3.5 text-accent" />
+                    Restore JSON Backup to Browser Storage
+                    <input
+                      type="file"
+                      accept=".json"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const text = await file.text();
+                          const parsed = JSON.parse(text);
+                          const res = await fetch("/api/workspace", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "restore_json_backup",
+                              payload: { backupData: parsed },
+                            }),
+                          });
+                          if (res.ok) {
+                            await loadWorkspace();
+                            notify("Restored JSON backup into Local Browser Storage", "success");
+                          } else {
+                            notify("Invalid backup JSON file", "error");
+                          }
+                        } catch {
+                          notify("Failed to parse JSON backup file", "error");
+                        }
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
