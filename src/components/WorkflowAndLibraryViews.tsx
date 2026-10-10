@@ -18,6 +18,11 @@ import {
   Layers,
   UserCheck,
   ArrowUpRight,
+  Send,
+  MessageSquare,
+  Upload,
+  Trash2,
+  X,
 } from "lucide-react";
 
 /* ============================================================================
@@ -43,7 +48,7 @@ export function PipelineKanbanView({
   onMutated,
   notify,
 }: PipelineKanbanProps) {
-  const [boardMode, setBoardMode] = useState<"opportunities" | "leads">("opportunities");
+  const [boardMode, setBoardMode] = useState<"opportunities" | "leads">("leads");
   const [search, setSearch] = useState("");
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [showAddOpp, setShowAddOpp] = useState(false);
@@ -97,6 +102,55 @@ export function PipelineKanbanView({
     }
     await onMutated();
     notify("Pipeline stage updated and logged", "success");
+  }
+
+  async function handleBlockMessageStatus(
+    orgId: string,
+    orgName: string,
+    messageStatus: "not_messaged" | "message_sent" | "followup_sent" | "replied",
+    e?: React.MouseEvent
+  ) {
+    if (e) e.stopPropagation();
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record_message_operation",
+        payload: { organizationId: orgId, messageStatus, channel: "Pipeline Outreach" },
+      }),
+    });
+    if (res.ok) {
+      await onMutated();
+      const labels: Record<string, string> = {
+        not_messaged: `Reset ${orgName} to Not Messaged`,
+        message_sent: `Marked Message Sent to ${orgName}`,
+        followup_sent: `Marked Follow-up Sent to ${orgName}`,
+        replied: `Marked ${orgName} as Replied`,
+      };
+      notify(labels[messageStatus] || "Message status updated", "success");
+    }
+  }
+
+  async function handleBlockBookmark(orgId: string, orgName: string, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "toggle_bookmark_inspiration",
+        payload: { organizationId: orgId },
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      await onMutated();
+      notify(
+        data.isBookmarked
+          ? `Bookmarked ${orgName} website to Design Inspirations`
+          : `Removed ${orgName} from Design Inspirations`,
+        data.isBookmarked ? "success" : "info"
+      );
+    }
   }
 
   async function handleCreateOpp(e: React.FormEvent) {
@@ -157,17 +211,6 @@ export function PipelineKanbanView({
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             <button
               type="button"
-              onClick={() => setBoardMode("opportunities")}
-              className={`px-3 py-1 rounded-md font-medium ${
-                boardMode === "opportunities"
-                  ? "bg-accent text-white"
-                  : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              Opportunities ({opportunities.length})
-            </button>
-            <button
-              type="button"
               onClick={() => setBoardMode("leads")}
               className={`px-3 py-1 rounded-md font-medium ${
                 boardMode === "leads"
@@ -176,6 +219,17 @@ export function PipelineKanbanView({
               }`}
             >
               All Leads ({organizations.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setBoardMode("opportunities")}
+              className={`px-3 py-1 rounded-md font-medium ${
+                boardMode === "opportunities"
+                  ? "bg-accent text-white"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Opportunities ({opportunities.length})
             </button>
           </div>
 
@@ -190,7 +244,7 @@ export function PipelineKanbanView({
         </div>
       </div>
 
-      {/* Kanban Board Columns (Matches Mockup 5) */}
+      {/* Kanban Board Columns */}
       <div className="flex gap-4 overflow-x-auto pb-4">
         {stages.map((stg) => {
           const items =
@@ -262,26 +316,51 @@ export function PipelineKanbanView({
                     boardMode === "opportunities"
                       ? orgMap.get(item.organizationId)
                       : item;
+                  const msgStatus = org?.messageStatus || "not_messaged";
                   return (
                     <div
                       key={item.id}
                       draggable
                       onDragStart={() => setDraggedItemId(item.id)}
-                      className="p-3.5 rounded-xl bg-app-secondary hover:bg-app-elevated border border-app-border transition space-y-2.5 cursor-grab active:cursor-grabbing"
+                      onClick={() => org && onOpenLead(org.id)}
+                      className="p-3.5 rounded-xl bg-app-secondary hover:bg-app-elevated border border-app-border transition space-y-2.5 cursor-pointer"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <button
                           type="button"
-                          onClick={() => org && onOpenLead(org.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (org) onOpenLead(org.id);
+                          }}
                           className="font-heading font-semibold text-xs text-text-primary hover:text-accent text-left"
                         >
                           {org?.name || item.name}
                         </button>
-                        {org?.score !== null && org?.score !== undefined && (
-                          <span className="px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-mono text-[10px] font-semibold">
-                            {org.score}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1">
+                          {org?.score !== null && org?.score !== undefined && (
+                            <span className="px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-mono text-[10px] font-semibold">
+                              {org.score}
+                            </span>
+                          )}
+                          {org && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleBlockBookmark(org.id, org.name, e)}
+                              title="Bookmark Website to Design Inspirations"
+                              className={`p-1 rounded ${
+                                org.isBookmarked
+                                  ? "text-accent"
+                                  : "text-text-muted hover:text-text-primary"
+                              }`}
+                            >
+                              <Bookmark
+                                className={`w-3.5 h-3.5 ${
+                                  org.isBookmarked ? "fill-current" : ""
+                                }`}
+                              />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {boardMode === "opportunities" && (
@@ -291,8 +370,88 @@ export function PipelineKanbanView({
                       )}
 
                       {org?.normalizedDomain && (
-                        <div className="text-[11px] font-mono text-text-muted truncate">
-                          {org.normalizedDomain}
+                        <div
+                          className="flex items-center justify-between text-[11px] font-mono text-text-muted"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <a
+                            href={
+                              org.websiteUrl?.startsWith("http")
+                                ? org.websiteUrl
+                                : `https://${org.websiteUrl}`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent hover:underline truncate inline-flex items-center gap-1"
+                          >
+                            {org.normalizedDomain}
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+                      )}
+
+                      {/* Simple Message Operations right on the Pipeline block */}
+                      {org && (
+                        <div
+                          className="p-2 rounded-lg bg-app-surface border border-app-border space-y-1.5"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-between text-[10px] font-mono text-text-muted">
+                            <span className="flex items-center gap-1">
+                              <MessageSquare className="w-3 h-3 text-accent" />
+                              MESSAGES
+                            </span>
+                            <span>
+                              {msgStatus === "message_sent"
+                                ? "Sent"
+                                : msgStatus === "followup_sent"
+                                ? "Follow-up"
+                                : msgStatus === "replied"
+                                ? "Replied"
+                                : "Not Sent"}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) =>
+                                handleBlockMessageStatus(org.id, org.name, "message_sent", e)
+                              }
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                msgStatus === "message_sent"
+                                  ? "bg-accent text-white border-accent"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              ✓ Sent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) =>
+                                handleBlockMessageStatus(org.id, org.name, "followup_sent", e)
+                              }
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                msgStatus === "followup_sent"
+                                  ? "bg-accent text-white border-accent"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              Follow-up
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) =>
+                                handleBlockMessageStatus(org.id, org.name, "replied", e)
+                              }
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                msgStatus === "replied"
+                                  ? "bg-status-success text-black border-status-success font-semibold"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              Replied
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -317,17 +476,11 @@ export function PipelineKanbanView({
                         </div>
                       )}
 
-                      {(item.nextAction || org?.nextAction) && (
-                        <div className="text-[11px] text-text-secondary bg-app-surface p-2 rounded border border-app-border">
-                          <span className="text-text-muted block text-[10px] font-mono">
-                            NEXT ACTION
-                          </span>
-                          {item.nextAction || org?.nextAction}
-                        </div>
-                      )}
-
                       {/* Accessible keyboard stage switcher */}
-                      <div className="pt-1 flex items-center justify-between">
+                      <div
+                        className="pt-1 flex items-center justify-between"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <span className="text-[10px] text-text-muted font-mono">
                           {org?.country || ""}
                         </span>
@@ -551,6 +704,48 @@ export function TasksAndFollowUpsView({
     notify("Task status updated", "success");
   }
 
+  async function handleQuickMessage(
+    organizationId: string,
+    operation: "message_sent" | "followup_sent" | "replied"
+  ) {
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record_message_operation",
+        payload: { organizationId, operation, channel: "Outreach" },
+      }),
+    });
+    await onMutated();
+    notify(
+      operation === "message_sent"
+        ? "Marked as Message Sent"
+        : operation === "followup_sent"
+        ? "Marked as Follow-up Sent"
+        : "Marked as Replied!",
+      "success"
+    );
+  }
+
+  async function handleToggleBookmark(organizationId: string) {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "toggle_bookmark_inspiration",
+        payload: { organizationId },
+      }),
+    });
+    const json = await res.json();
+    await onMutated();
+    notify(
+      json.bookmarked
+        ? "Bookmarked website to Design Inspirations!"
+        : "Removed from Design Inspirations",
+      "success"
+    );
+  }
+
   async function handleCreateTask(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
@@ -583,7 +778,7 @@ export function TasksAndFollowUpsView({
             Tasks, Follow-ups &amp; Schedule
           </h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            Track overdue actions, daily follow-up queues, and scheduled prospect reminders (Timezone: Asia/Kolkata).
+            Track overdue actions, daily follow-up queues, and quick message operations (Timezone: Asia/Kolkata).
           </p>
         </div>
 
@@ -663,7 +858,7 @@ export function TasksAndFollowUpsView({
                 <th className="py-2.5 px-4 w-10">Done</th>
                 <th className="py-2.5 px-4">Task / Follow-up</th>
                 <th className="py-2.5 px-4">Related Organization</th>
-                <th className="py-2.5 px-4">Type</th>
+                <th className="py-2.5 px-4">Message &amp; Bookmark Ops</th>
                 <th className="py-2.5 px-4">Due Date</th>
                 <th className="py-2.5 px-4">Priority</th>
                 <th className="py-2.5 px-4">Status</th>
@@ -719,7 +914,61 @@ export function TasksAndFollowUpsView({
                           <span className="text-text-muted">—</span>
                         )}
                       </td>
-                      <td className="py-3 px-4 font-mono text-text-secondary">{t.taskType}</td>
+                      <td className="py-3 px-4">
+                        {org ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMessage(org.id, "message_sent")}
+                              className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                                org.outreachStatus === "message_sent" ||
+                                org.primaryStageId === "stg_contacted"
+                                  ? "bg-status-info text-white border-status-info"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              ✓ Sent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMessage(org.id, "followup_sent")}
+                              className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                                org.outreachStatus === "followup_sent"
+                                  ? "bg-accent text-white border-accent"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              Follow-up
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMessage(org.id, "replied")}
+                              className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                                org.outreachStatus === "replied" ||
+                                org.primaryStageId === "stg_replied"
+                                  ? "bg-status-success text-white border-status-success"
+                                  : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              Replied
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleBookmark(org.id)}
+                              title="Bookmark Website to Design Inspirations"
+                              className={`p-1 rounded border transition ${
+                                org.isBookmarkedInspiration
+                                  ? "bg-status-warning/20 border-status-warning/40 text-status-warning"
+                                  : "bg-app-secondary border-app-border text-text-muted hover:text-status-warning"
+                              }`}
+                            >
+                              <Bookmark className="w-3 h-3 fill-current" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-text-muted font-mono text-[11px]">{t.taskType}</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 font-mono">
                         <span
                           className={
@@ -789,24 +1038,63 @@ export function TasksAndFollowUpsView({
                     </span>
                   </div>
                   <div className="space-y-2">
-                    {dayTasks.map((t) => (
-                      <div
-                        key={t.id}
-                        className="p-2.5 rounded-lg bg-app-secondary border border-app-border text-xs flex items-start justify-between gap-2"
-                      >
-                        <div>
-                          <div className="font-medium text-text-primary">{t.title}</div>
-                          <div className="text-[11px] font-mono text-text-muted">
-                            {t.dueTime || "All day"} • {t.taskType}
+                    {dayTasks.map((t) => {
+                      const org = orgMap.get(t.organizationId);
+                      return (
+                        <div
+                          key={t.id}
+                          className="p-2.5 rounded-lg bg-app-secondary border border-app-border text-xs space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-medium text-text-primary">{t.title}</div>
+                              <div className="text-[11px] font-mono text-text-muted">
+                                {t.dueTime || "All day"} • {t.taskType}
+                              </div>
+                              {org && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenLead(org.id)}
+                                  className="text-[11px] text-accent hover:underline font-medium mt-0.5"
+                                >
+                                  {org.name}
+                                </button>
+                              )}
+                            </div>
+                            <input
+                              type="checkbox"
+                              checked={t.status === "Completed"}
+                              onChange={() => handleToggleTask(t.id)}
+                            />
                           </div>
+                          {org && (
+                            <div className="flex items-center gap-1 pt-1.5 border-t border-app-border/70">
+                              <button
+                                type="button"
+                                onClick={() => handleQuickMessage(org.id, "message_sent")}
+                                className="flex-1 py-1 rounded bg-app-surface border border-app-border text-[10px] font-semibold text-text-secondary hover:text-text-primary"
+                              >
+                                ✓ Sent
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickMessage(org.id, "followup_sent")}
+                                className="flex-1 py-1 rounded bg-app-surface border border-app-border text-[10px] font-semibold text-text-secondary hover:text-text-primary"
+                              >
+                                Follow-up
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleQuickMessage(org.id, "replied")}
+                                className="flex-1 py-1 rounded bg-app-surface border border-app-border text-[10px] font-semibold text-text-secondary hover:text-text-primary"
+                              >
+                                Replied
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        <input
-                          type="checkbox"
-                          checked={t.status === "Completed"}
-                          onChange={() => handleToggleTask(t.id)}
-                        />
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -923,7 +1211,7 @@ export function TasksAndFollowUpsView({
 }
 
 /* ============================================================================
-   3. REFERENCE LIBRARY & CONTENT IDEAS VIEW (Sections 18 & 19, Mockups 8, 10, 11)
+   3. DESIGN INSPIRATIONS, BOOKMARKED WEBSITES & CONTENT IDEAS VIEW (Sections 18 & 19)
    ============================================================================ */
 interface LibraryViewProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -950,13 +1238,15 @@ export function ReferencesAndContentView({
   const [tab, setTab] = useState<"references" | "content">(initialTab);
   const [refCatFilter, setRefCatFilter] = useState("");
   const [contentStatusFilter, setContentStatusFilter] = useState("");
+  const [previewImage, setPreviewImage] = useState<{ title: string; url: string } | null>(null);
 
-  // Add Reference state
+  // Add Reference / Design Inspiration state
   const [showAddRef, setShowAddRef] = useState(false);
   const [refTitle, setRefTitle] = useState("");
   const [refUrl, setRefUrl] = useState("");
-  const [refCategory, setRefCategory] = useState("Good Reel");
+  const [refCategory, setRefCategory] = useState("Design Inspiration");
   const [refDesc, setRefDesc] = useState("");
+  const [refScreenshotUrl, setRefScreenshotUrl] = useState("");
   const [refOrgId, setRefOrgId] = useState("");
 
   // Add Content Idea state
@@ -976,9 +1266,21 @@ export function ReferencesAndContentView({
     (c) => !contentStatusFilter || c.status === contentStatusFilter
   );
 
+  function handleScreenshotFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        setRefScreenshotUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function handleCreateRef(e: React.FormEvent) {
     e.preventDefault();
-    if (!refTitle.trim() || !refUrl.trim()) return;
+    if (!refTitle.trim()) return;
     await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -986,9 +1288,10 @@ export function ReferencesAndContentView({
         action: "upsert_reference",
         payload: {
           title: refTitle.trim(),
-          url: refUrl.trim(),
+          url: refUrl.trim() || refScreenshotUrl.trim() || "https://localhost:3000",
           category: refCategory,
           description: refDesc.trim(),
+          screenshotUrl: refScreenshotUrl.trim() || null,
           organizationId: refOrgId || null,
         },
       }),
@@ -996,9 +1299,23 @@ export function ReferencesAndContentView({
     setRefTitle("");
     setRefUrl("");
     setRefDesc("");
+    setRefScreenshotUrl("");
     setShowAddRef(false);
     await onMutated();
-    notify("Reference saved to library", "success");
+    notify("Design Inspiration / Website Bookmark saved!", "success");
+  }
+
+  async function handleDeleteRef(id: string) {
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete_reference",
+        payload: { id },
+      }),
+    });
+    await onMutated();
+    notify("Removed from Design Inspirations", "info");
   }
 
   async function handleCreateIdea(e: React.FormEvent) {
@@ -1025,7 +1342,11 @@ export function ReferencesAndContentView({
     notify("Content idea created", "success");
   }
 
-  async function handleIdeaStatusChange(id: string, currentIdea: Record<string, unknown>, nextStatus: string) {
+  async function handleIdeaStatusChange(
+    id: string,
+    currentIdea: Record<string, unknown>,
+    nextStatus: string
+  ) {
     await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1042,11 +1363,12 @@ export function ReferencesAndContentView({
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-app-border pb-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-text-primary">
-            Reference Library &amp; Content Ideas
+          <h1 className="text-xl font-heading font-bold text-text-primary flex items-center gap-2">
+            <Bookmark className="w-5 h-5 text-status-warning fill-status-warning" />
+            Design Inspirations, Website Bookmarks &amp; Content Ideas
           </h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            Save website inspiration, Good Reel candidates, and content hooks independently from active sales deals.
+            Your saved UI/UX design inspirations, bookmarked lead websites, and content hooks — stored 100% in Local Browser Storage.
           </p>
         </div>
 
@@ -1061,7 +1383,7 @@ export function ReferencesAndContentView({
                   : "text-text-secondary hover:text-text-primary"
               }`}
             >
-              References ({references.length})
+              Design Inspirations ({references.length})
             </button>
             <button
               type="button"
@@ -1080,16 +1402,16 @@ export function ReferencesAndContentView({
             <button
               type="button"
               onClick={() => setShowAddRef(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm"
             >
               <Plus className="w-4 h-4" />
-              + Add Reference
+              + Add Design Inspiration
             </button>
           ) : (
             <button
               type="button"
               onClick={() => setShowAddIdea(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm"
             >
               <Plus className="w-4 h-4" />
               + Add Content Idea
@@ -1103,64 +1425,144 @@ export function ReferencesAndContentView({
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               "",
+              "Design Inspiration",
+              "Good Website Design",
+              "Landing Page Inspiration",
               "Good Reel",
               "For Reference",
               "Good, Need to Work With It",
-              "Good Website Design",
               "Competitor",
-              "Landing Page Inspiration",
             ].map((cat) => (
               <button
                 key={cat || "all"}
                 type="button"
                 onClick={() => setRefCatFilter(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                   refCatFilter === cat
-                    ? "bg-accent text-white"
+                    ? "bg-accent text-white shadow-sm"
                     : "bg-app-surface border border-app-border text-text-secondary hover:text-text-primary"
                 }`}
               >
-                {cat || "All References"}
+                {cat || `All Inspirations (${references.length})`}
               </button>
             ))}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredRefs.map((ref) => {
               const linkedOrg = orgMap.get(ref.organizationId);
               return (
                 <div
                   key={ref.id}
-                  className="bg-app-surface border border-app-border rounded-xl overflow-hidden flex flex-col justify-between"
+                  className="bg-app-surface border border-app-border hover:border-accent/50 rounded-2xl overflow-hidden flex flex-col justify-between transition group shadow-sm"
                 >
                   <div>
-                    {/* Clean visual preview header */}
-                    <div className="h-32 bg-gradient-to-br from-app-secondary to-app-elevated border-b border-app-border p-4 flex flex-col justify-between">
-                      <div className="flex items-center justify-between">
-                        <span className="px-2.5 py-0.5 rounded-full bg-accent/20 text-accent font-mono text-[11px] font-semibold">
-                          {ref.category}
-                        </span>
+                    {/* Visual Image Preview or Gradient Header */}
+                    {ref.screenshotUrl ? (
+                      <div className="relative h-52 bg-app-secondary border-b border-app-border overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={ref.screenshotUrl}
+                          alt={ref.title}
+                          onClick={() =>
+                            setPreviewImage({ title: ref.title, url: ref.screenshotUrl })
+                          }
+                          className="w-full h-full object-cover object-top cursor-zoom-in group-hover:scale-[1.02] transition duration-300"
+                        />
+                        <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                          <span className="px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-status-warning font-mono text-[11px] font-semibold inline-flex items-center gap-1 border border-white/10">
+                            <Bookmark className="w-3 h-3 fill-status-warning" />
+                            {ref.category}
+                          </span>
+                        </div>
+                        <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({ title: ref.title, url: ref.screenshotUrl })
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-white text-[11px] font-medium hover:bg-accent transition"
+                          >
+                            Expand Preview
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRef(ref.id)}
+                            title="Delete Reference"
+                            className="p-1.5 rounded-lg bg-black/75 backdrop-blur-md text-white/70 hover:text-status-error transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-36 bg-gradient-to-br from-accent/15 via-app-secondary to-app-elevated border-b border-app-border p-4 flex flex-col justify-between">
+                        <div className="flex items-center justify-between">
+                          <span className="px-2.5 py-0.5 rounded-full bg-status-warning/20 text-status-warning font-mono text-[11px] font-semibold inline-flex items-center gap-1">
+                            <Bookmark className="w-3 h-3 fill-status-warning" />
+                            {ref.category}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={ref.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-accent hover:underline inline-flex items-center gap-1 font-mono"
+                            >
+                              Visit Site <ExternalLink className="w-3 h-3" />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteRef(ref.id)}
+                              title="Remove Bookmark"
+                              className="text-text-muted hover:text-status-error transition"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
                         <a
                           href={ref.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs text-text-secondary hover:text-text-primary inline-flex items-center gap-1 font-mono"
+                          className="font-mono text-xs text-text-primary hover:text-accent truncate block"
                         >
-                          Visit <ExternalLink className="w-3 h-3" />
+                          {ref.url}
                         </a>
                       </div>
-                      <div className="font-mono text-xs text-text-muted truncate">
-                        {ref.url}
-                      </div>
-                    </div>
+                    )}
 
                     <div className="p-4 space-y-2">
-                      <h3 className="font-heading font-semibold text-sm text-text-primary">
-                        {ref.title}
-                      </h3>
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="font-heading font-bold text-sm text-text-primary">
+                          {ref.title}
+                        </h3>
+                        {ref.url && !ref.url.startsWith("/") && (
+                          <a
+                            href={ref.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-xs text-accent hover:underline inline-flex items-center gap-1 shrink-0 font-medium"
+                          >
+                            Open <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
                       <p className="text-xs text-text-secondary leading-relaxed">
-                        {ref.description || "Saved reference benchmark."}
+                        {ref.description || "Saved design inspiration and website reference."}
                       </p>
+                      {Array.isArray(ref.tags) && ref.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {ref.tags.map((tag: string) => (
+                            <span
+                              key={tag}
+                              className="px-2 py-0.5 rounded bg-app-secondary border border-app-border text-[10px] font-mono text-text-muted"
+                            >
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1171,10 +1573,10 @@ export function ReferencesAndContentView({
                         onClick={() => onOpenLead(linkedOrg.id)}
                         className="text-accent hover:underline font-medium"
                       >
-                        Linked: {linkedOrg.name}
+                        Lead: {linkedOrg.name}
                       </button>
                     ) : (
-                      <span className="text-text-muted">Standalone Reference</span>
+                      <span className="text-text-muted font-medium">Design Inspiration Library</span>
                     )}
                     <span className="font-mono text-[10px] text-text-muted">
                       {new Date(ref.createdAt).toLocaleDateString()}
@@ -1294,7 +1696,41 @@ export function ReferencesAndContentView({
         </div>
       )}
 
-      {/* Add Reference Modal */}
+      {/* Fullscreen Lightbox for Design Inspiration Image */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-6"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div
+            className="max-w-5xl w-full bg-app-surface border border-app-border rounded-2xl overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-3.5 border-b border-app-border flex items-center justify-between">
+              <h3 className="font-heading font-bold text-sm text-text-primary">
+                {previewImage.title}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="p-1.5 rounded-lg bg-app-secondary text-text-secondary hover:text-text-primary"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 bg-app-bg max-h-[80vh] overflow-y-auto flex justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewImage.url}
+                alt={previewImage.title}
+                className="max-w-full h-auto rounded-lg border border-app-border"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Design Inspiration / Reference Modal */}
       {showAddRef && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <form
@@ -1302,7 +1738,7 @@ export function ReferencesAndContentView({
             className="w-full max-w-md bg-app-surface border border-app-border rounded-xl p-6 space-y-4 shadow-xl"
           >
             <h2 className="text-base font-heading font-bold text-text-primary">
-              Save Website or Design Reference
+              Save Design Inspiration or Website Bookmark
             </h2>
             <div className="space-y-3 text-xs">
               <div>
@@ -1310,17 +1746,16 @@ export function ReferencesAndContentView({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Minimalist D2C Product Page"
+                  placeholder="e.g. Minimalist Dark Mode CRM Dashboard"
                   value={refTitle}
                   onChange={(e) => setRefTitle(e.target.value)}
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 />
               </div>
               <div>
-                <label className="block text-text-secondary mb-1">URL *</label>
+                <label className="block text-text-secondary mb-1">Website URL (optional if uploading image)</label>
                 <input
-                  type="url"
-                  required
+                  type="text"
                   placeholder="https://example.com"
                   value={refUrl}
                   onChange={(e) => setRefUrl(e.target.value)}
@@ -1328,18 +1763,30 @@ export function ReferencesAndContentView({
                 />
               </div>
               <div>
-                <label className="block text-text-secondary mb-1">Reference Category</label>
+                <label className="block text-text-secondary mb-1">
+                  Upload Design Screenshot (saved in Browser Storage)
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleScreenshotFileUpload}
+                  className="w-full text-xs text-text-secondary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-accent/15 file:text-accent file:font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-text-secondary mb-1">Category</label>
                 <select
                   value={refCategory}
                   onChange={(e) => setRefCategory(e.target.value)}
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
+                  <option value="Design Inspiration">Design Inspiration</option>
+                  <option value="Good Website Design">Good Website Design</option>
+                  <option value="Landing Page Inspiration">Landing Page Inspiration</option>
                   <option value="Good Reel">Good Reel</option>
                   <option value="For Reference">For Reference</option>
                   <option value="Good, Need to Work With It">Good, Need to Work With It</option>
-                  <option value="Good Website Design">Good Website Design</option>
                   <option value="Competitor">Competitor</option>
-                  <option value="Landing Page Inspiration">Landing Page Inspiration</option>
                 </select>
               </div>
               <div>
@@ -1349,7 +1796,7 @@ export function ReferencesAndContentView({
                   onChange={(e) => setRefOrgId(e.target.value)}
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
-                  <option value="">None (Standalone)</option>
+                  <option value="">None (Standalone Inspiration)</option>
                   {organizations.slice(0, 100).map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name}
@@ -1358,7 +1805,7 @@ export function ReferencesAndContentView({
                 </select>
               </div>
               <div>
-                <label className="block text-text-secondary mb-1">Notes / Observations</label>
+                <label className="block text-text-secondary mb-1">Design Notes / Why Bookmarked</label>
                 <textarea
                   rows={2}
                   value={refDesc}
@@ -1379,7 +1826,7 @@ export function ReferencesAndContentView({
                 type="submit"
                 className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
               >
-                Save Reference
+                Save Inspiration
               </button>
             </div>
           </form>
@@ -1512,6 +1959,29 @@ export function ContactsAndSuppressionView({
   const [dncReason, setDncReason] = useState("");
   const orgMap = new Map(organizations.map((o) => [o.id, o]));
 
+  async function handleQuickMessage(
+    organizationId: string,
+    operation: "message_sent" | "followup_sent" | "replied"
+  ) {
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record_message_operation",
+        payload: { organizationId, operation, channel: "Outreach" },
+      }),
+    });
+    await onMutated();
+    notify(
+      operation === "message_sent"
+        ? "Marked as Message Sent"
+        : operation === "followup_sent"
+        ? "Marked as Follow-up Sent"
+        : "Marked as Replied!",
+      "success"
+    );
+  }
+
   async function handleAddSuppression(e: React.FormEvent) {
     e.preventDefault();
     if (!dncDomain.trim()) return;
@@ -1540,7 +2010,7 @@ export function ContactsAndSuppressionView({
             Contacts &amp; Do Not Contact Registry
           </h1>
           <p className="text-xs text-text-secondary mt-0.5">
-            Manage decision-maker contacts and enforce strict outreach suppression rules.
+            Manage decision-maker contacts, trigger message operations, and enforce strict outreach suppression rules.
           </p>
         </div>
 
@@ -1578,8 +2048,8 @@ export function ContactsAndSuppressionView({
                 <th className="py-2.5 px-4">Full Name</th>
                 <th className="py-2.5 px-4">Role / Title</th>
                 <th className="py-2.5 px-4">Organization</th>
-                <th className="py-2.5 px-4">Email</th>
-                <th className="py-2.5 px-4">Phone</th>
+                <th className="py-2.5 px-4">Email / Phone</th>
+                <th className="py-2.5 px-4">Message Operations</th>
                 <th className="py-2.5 px-4">Outreach Eligibility</th>
               </tr>
             </thead>
@@ -1595,7 +2065,7 @@ export function ContactsAndSuppressionView({
                         <button
                           type="button"
                           onClick={() => onOpenLead(org.id)}
-                          className="text-accent hover:underline"
+                          className="text-accent hover:underline font-medium"
                         >
                           {org.name}
                         </button>
@@ -1603,8 +2073,51 @@ export function ContactsAndSuppressionView({
                         "—"
                       )}
                     </td>
-                    <td className="py-3 px-4 font-mono text-text-secondary">{c.email || "—"}</td>
-                    <td className="py-3 px-4 font-mono text-text-secondary">{c.phone || "—"}</td>
+                    <td className="py-3 px-4 font-mono text-text-secondary">
+                      <div>{c.email || "—"}</div>
+                      {c.phone && <div className="text-[11px] text-text-muted">{c.phone}</div>}
+                    </td>
+                    <td className="py-3 px-4">
+                      {org ? (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickMessage(org.id, "message_sent")}
+                            className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                              org.outreachStatus === "message_sent"
+                                ? "bg-status-info text-white border-status-info"
+                                : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            ✓ Sent
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickMessage(org.id, "followup_sent")}
+                            className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                              org.outreachStatus === "followup_sent"
+                                ? "bg-accent text-white border-accent"
+                                : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            Follow-up
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleQuickMessage(org.id, "replied")}
+                            className={`px-2 py-1 rounded text-[10px] font-semibold border transition ${
+                              org.outreachStatus === "replied"
+                                ? "bg-status-success text-white border-status-success"
+                                : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            Replied
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </td>
                     <td className="py-3 px-4">
                       {c.doNotContact ? (
                         <span className="px-2 py-0.5 rounded bg-status-error/15 text-status-error font-mono text-[11px]">
