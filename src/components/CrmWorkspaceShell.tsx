@@ -293,7 +293,7 @@ export function CrmWorkspaceShell({
             Loading JAYANT CRM Workspace...
           </div>
           <div className="text-xs font-mono text-text-muted">
-            Connecting to PostgreSQL &amp; verifying lead ledger
+            Initializing Local Browser Storage workspace
           </div>
         </div>
       </div>
@@ -316,16 +316,31 @@ export function CrmWorkspaceShell({
   const savedViews = data.savedViews || [];
   const savedMappings = data.savedMappings || [];
 
-  // Dashboard Metrics (Section 6.2 — 100% real database counts)
+  // Dashboard Metrics (Section 6.2 — 100% live counts from Local Browser Storage)
   const todayStr = new Date().toISOString().split("T")[0];
   const totalLeadsCount = organizations.length;
+  const indiaLeadsCount = organizations.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (o: any) =>
+      (o.market || "").toLowerCase() === "india" ||
+      (o.country || "").toLowerCase() === "india"
+  ).length;
+  const intlLeadsCount = Math.max(0, totalLeadsCount - indiaLeadsCount);
   const highPriorityLeadsCount = organizations.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (o: any) => o.score !== null && o.score >= 75
   ).length;
+  const siteDescriptionLeadsCount = organizations.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (o: any) => (o.verificationLevel || "").toLowerCase().includes("site")
+  ).length;
   const directoryOnlyLeadsCount = organizations.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (o: any) => (o.verificationLevel || "").toLowerCase().includes("directory")
+  ).length;
+  const flaggedEvidenceLeadsCount = organizations.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (o: any) => o.contactEvidenceValid === false
   ).length;
   const followUpsDueCount = tasks.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -765,7 +780,7 @@ export function CrmWorkspaceShell({
                       {totalLeadsCount}
                     </div>
                     <div className="text-[11px] font-mono text-status-info mt-1">
-                      100 India • 100 International
+                      {indiaLeadsCount} India • {intlLeadsCount} International
                     </div>
                   </div>
                   <div className="w-10 h-10 rounded-xl bg-status-info/15 text-status-info flex items-center justify-center">
@@ -775,8 +790,8 @@ export function CrmWorkspaceShell({
 
                 <div
                   onClick={() => {
-                    setSelectedCollectionId("col_global_ecommerce");
-                    setActiveNav("collection_detail");
+                    setSelectedCollectionId(undefined);
+                    setActiveNav("leads");
                   }}
                   className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition flex items-center justify-between"
                 >
@@ -785,10 +800,10 @@ export function CrmWorkspaceShell({
                       Needs Verification / Action
                     </div>
                     <div className="text-2xl font-heading font-bold text-status-warning mt-1">
-                      {directoryOnlyLeadsCount}
+                      {directoryOnlyLeadsCount + flaggedEvidenceLeadsCount}
                     </div>
                     <div className="text-[11px] font-mono text-text-muted mt-1">
-                      8 directory-only • {highPriorityLeadsCount} scored high
+                      {directoryOnlyLeadsCount} directory-only • {highPriorityLeadsCount} scored high
                     </div>
                   </div>
                   <div className="w-10 h-10 rounded-xl bg-status-warning/15 text-status-warning flex items-center justify-center">
@@ -855,61 +870,76 @@ export function CrmWorkspaceShell({
                     </button>
                   </div>
 
-                  <div className="space-y-2">
-                    {tasks
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      .filter((t: any) => t.status !== "Completed")
-                      .slice(0, 5)
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      .map((t: any) => {
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {tasks.filter((t: any) => t.status !== "Completed").length === 0 ? (
+                    <div className="p-6 rounded-lg bg-app-secondary/50 border border-app-border text-center text-xs text-text-muted">
+                      No open follow-up tasks scheduled yet. Create tasks from any lead profile or the{" "}
+                      <button
+                        type="button"
+                        onClick={() => setActiveNav("tasks")}
+                        className="text-accent hover:underline font-medium"
+                      >
+                        Tasks
+                      </button>{" "}
+                      view.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {tasks
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const org = organizations.find((o: any) => o.id === t.organizationId);
-                        const isOverdue = t.dueDate < todayStr;
-                        return (
-                          <div
-                            key={t.id}
-                            className="p-3 rounded-lg bg-app-secondary border border-app-border flex items-center justify-between gap-3 text-xs"
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <input
-                                type="checkbox"
-                                checked={t.status === "Completed"}
-                                onChange={() => handleToggleDashboardTask(t.id)}
-                                aria-label={`Complete task ${t.title}`}
-                              />
-                              <div className="truncate">
-                                <div className="font-medium text-text-primary truncate">
-                                  {t.title}
+                        .filter((t: any) => t.status !== "Completed")
+                        .slice(0, 5)
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        .map((t: any) => {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          const org = organizations.find((o: any) => o.id === t.organizationId);
+                          const isOverdue = t.dueDate < todayStr;
+                          return (
+                            <div
+                              key={t.id}
+                              className="p-3 rounded-lg bg-app-secondary border border-app-border flex items-center justify-between gap-3 text-xs"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={t.status === "Completed"}
+                                  onChange={() => handleToggleDashboardTask(t.id)}
+                                  aria-label={`Complete task ${t.title}`}
+                                />
+                                <div className="truncate">
+                                  <div className="font-medium text-text-primary truncate">
+                                    {t.title}
+                                  </div>
+                                  {org && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setActiveLeadProfileId(org.id)}
+                                      className="text-[11px] text-accent hover:underline"
+                                    >
+                                      {org.name} ({org.country})
+                                    </button>
+                                  )}
                                 </div>
-                                {org && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setActiveLeadProfileId(org.id)}
-                                    className="text-[11px] text-accent hover:underline"
-                                  >
-                                    {org.name} ({org.country})
-                                  </button>
-                                )}
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border font-mono text-[10px] text-text-secondary">
+                                  {t.taskType}
+                                </span>
+                                <span
+                                  className={`font-mono text-[11px] ${
+                                    isOverdue
+                                      ? "text-status-error font-semibold"
+                                      : "text-status-warning"
+                                  }`}
+                                >
+                                  {isOverdue ? `Overdue (${t.dueDate})` : t.dueTime || t.dueDate}
+                                </span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border font-mono text-[10px] text-text-secondary">
-                                {t.taskType}
-                              </span>
-                              <span
-                                className={`font-mono text-[11px] ${
-                                  isOverdue
-                                    ? "text-status-error font-semibold"
-                                    : "text-status-warning"
-                                }`}
-                              >
-                                {isOverdue ? `Overdue (${t.dueDate})` : t.dueTime || t.dueDate}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
+                          );
+                        })}
+                    </div>
+                  )}
                 </div>
 
                 {/* Leads by Collection & Ledger Status */}
@@ -950,15 +980,21 @@ export function CrmWorkspaceShell({
                     </div>
                     <div className="flex justify-between text-text-secondary">
                       <span>Site Description Verified:</span>
-                      <strong className="font-mono text-status-success">192</strong>
+                      <strong className="font-mono text-status-success">
+                        {siteDescriptionLeadsCount}
+                      </strong>
                     </div>
                     <div className="flex justify-between text-text-secondary">
                       <span>Directory-Only Unresolved:</span>
-                      <strong className="font-mono text-status-warning">8</strong>
+                      <strong className="font-mono text-status-warning">
+                        {directoryOnlyLeadsCount}
+                      </strong>
                     </div>
                     <div className="flex justify-between text-text-secondary">
-                      <span>Flagged URL Anomalies (49, sent):</span>
-                      <strong className="font-mono text-status-error">2</strong>
+                      <span>Flagged URL Anomalies:</span>
+                      <strong className="font-mono text-status-error">
+                        {flaggedEvidenceLeadsCount}
+                      </strong>
                     </div>
                   </div>
                 </div>
@@ -979,24 +1015,30 @@ export function CrmWorkspaceShell({
                       All History
                     </button>
                   </div>
-                  <div className="space-y-3">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {activities.slice(0, 6).map((act: any) => (
-                      <div
-                        key={act.id}
-                        className="text-xs border-l-2 border-accent pl-3 py-0.5 space-y-0.5"
-                      >
-                        <div className="font-medium text-text-primary">{act.title}</div>
-                        <div className="font-mono text-[10px] text-text-muted">
-                          {act.actorOrigin.toUpperCase()} •{" "}
-                          {new Date(act.createdAt).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
+                  {activities.length === 0 ? (
+                    <div className="p-5 rounded-lg bg-app-secondary/50 border border-app-border text-center text-xs text-text-muted">
+                      No activity recorded yet. Import a spreadsheet or add a lead to start tracking activity.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {activities.slice(0, 6).map((act: any) => (
+                        <div
+                          key={act.id}
+                          className="text-xs border-l-2 border-accent pl-3 py-0.5 space-y-0.5"
+                        >
+                          <div className="font-medium text-text-primary">{act.title}</div>
+                          <div className="font-mono text-[10px] text-text-muted">
+                            {act.actorOrigin.toUpperCase()} •{" "}
+                            {new Date(act.createdAt).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 <div className="lg:col-span-2 bg-app-surface border border-app-border rounded-xl p-5 space-y-3">
@@ -1016,51 +1058,75 @@ export function CrmWorkspaceShell({
                     </button>
                   </div>
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-app-secondary text-text-muted font-mono uppercase text-[10px]">
-                        <tr>
-                          <th className="py-2 px-3">Company</th>
-                          <th className="py-2 px-3">Market / Country</th>
-                          <th className="py-2 px-3">Niche</th>
-                          <th className="py-2 px-3">Verification</th>
-                          <th className="py-2 px-3">Outreach Status</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-app-border">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                        {organizations.slice(0, 6).map((o: any) => (
-                          <tr
-                            key={o.id}
-                            onClick={() => setActiveLeadProfileId(o.id)}
-                            className="hover:bg-app-secondary/60 cursor-pointer"
-                          >
-                            <td className="py-2.5 px-3 font-medium text-text-primary">
-                              {o.name}
-                            </td>
-                            <td className="py-2.5 px-3 text-text-secondary">
-                              {o.country} ({o.market})
-                            </td>
-                            <td className="py-2.5 px-3 text-text-secondary">{o.industry}</td>
-                            <td className="py-2.5 px-3 font-mono text-[11px]">
-                              <span
-                                className={
-                                  o.verificationLevel.includes("directory")
-                                    ? "text-status-warning"
-                                    : "text-status-success"
-                                }
-                              >
-                                {o.verificationLevel}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 font-mono text-[11px] text-text-muted">
-                              {o.outreachApproval}
-                            </td>
+                  {organizations.length === 0 ? (
+                    <div className="p-6 rounded-lg bg-app-secondary/50 border border-app-border text-center space-y-3">
+                      <div className="text-xs text-text-secondary">
+                        Your Local Browser Storage contains <strong>0 leads</strong> (no dummy data). Upload your Excel/CSV spreadsheet or add a lead manually to begin.
+                      </div>
+                      <div className="flex items-center justify-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setActiveNav("imports")}
+                          className="px-3.5 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold"
+                        >
+                          Upload .XLSX / .CSV Spreadsheet
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setQuickAddOpen(true)}
+                          className="px-3.5 py-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary text-xs font-medium"
+                        >
+                          + Add Lead Manually
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-app-secondary text-text-muted font-mono uppercase text-[10px]">
+                          <tr>
+                            <th className="py-2 px-3">Company</th>
+                            <th className="py-2 px-3">Market / Country</th>
+                            <th className="py-2 px-3">Niche</th>
+                            <th className="py-2 px-3">Verification</th>
+                            <th className="py-2 px-3">Outreach Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        </thead>
+                        <tbody className="divide-y divide-app-border">
+                          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                          {organizations.slice(0, 6).map((o: any) => (
+                            <tr
+                              key={o.id}
+                              onClick={() => setActiveLeadProfileId(o.id)}
+                              className="hover:bg-app-secondary/60 cursor-pointer"
+                            >
+                              <td className="py-2.5 px-3 font-medium text-text-primary">
+                                {o.name}
+                              </td>
+                              <td className="py-2.5 px-3 text-text-secondary">
+                                {o.country} ({o.market})
+                              </td>
+                              <td className="py-2.5 px-3 text-text-secondary">{o.industry}</td>
+                              <td className="py-2.5 px-3 font-mono text-[11px]">
+                                <span
+                                  className={
+                                    (o.verificationLevel || "").includes("directory")
+                                      ? "text-status-warning"
+                                      : "text-status-success"
+                                  }
+                                >
+                                  {o.verificationLevel}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-mono text-[11px] text-text-muted">
+                                {o.outreachApproval}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1425,22 +1491,6 @@ export function CrmWorkspaceShell({
                 </div>
 
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await fetch("/api/workspace", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ action: "reseed_workspace" }),
-                      });
-                      await loadWorkspace();
-                      notify("Loaded 200-lead Global E-Commerce Ledger into Local Browser Storage", "success");
-                    }}
-                    className="px-4 py-2 rounded-lg bg-status-success/15 text-status-success border border-status-success/30 text-xs font-semibold"
-                  >
-                    Reload Default 200-Lead Global E-Commerce Ledger
-                  </button>
-
                   <button
                     type="button"
                     onClick={async () => {
