@@ -4,16 +4,11 @@ import React, { useEffect, useState, useCallback } from "react";
 import {
   X,
   Globe,
-  ExternalLink,
   AlertTriangle,
   Edit3,
-  Plus,
-  Calendar,
   Paperclip,
-  Archive,
   Pin,
   CheckCircle2,
-  Sparkles,
   Phone,
   Mail,
   Video,
@@ -28,13 +23,84 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  RefreshCw,
+  Compass,
+  Maximize2,
 } from "lucide-react";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
+
+export function resolveLeadWebPages(org: {
+  websiteUrl?: string | null;
+  normalizedDomain?: string | null;
+  contactEvidenceUrl?: string | null;
+  contactEvidenceValid?: boolean | null;
+}): {
+  websitePageUrl: string | null;
+  contactPageUrl: string | null;
+  displayDomain: string | null;
+  hasVerifiedContactPage: boolean;
+} {
+  let websitePageUrl: string | null = null;
+  let contactPageUrl: string | null = null;
+  let displayDomain: string | null = org.normalizedDomain || null;
+
+  const rawWebsite = (org.websiteUrl || "").trim();
+  if (rawWebsite && rawWebsite.toLowerCase() !== "unknown") {
+    websitePageUrl = rawWebsite.startsWith("http") ? rawWebsite : `https://${rawWebsite}`;
+  }
+
+  const rawContact = (org.contactEvidenceUrl || "").trim();
+  const hasVerifiedContactPage = Boolean(org.contactEvidenceValid && rawContact);
+  if (hasVerifiedContactPage) {
+    contactPageUrl = rawContact.startsWith("http") ? rawContact : `https://${rawContact}`;
+  }
+
+  // When there's a Contact Page URL, ensure we ALWAYS also have the root Website Page URL
+  if (!websitePageUrl && contactPageUrl) {
+    try {
+      const parsed = new URL(contactPageUrl);
+      websitePageUrl = parsed.origin;
+      if (!displayDomain) {
+        displayDomain = parsed.hostname.replace(/^www\./i, "");
+      }
+    } catch {
+      // ignore invalid URL
+    }
+  }
+
+  if (!displayDomain && websitePageUrl) {
+    try {
+      displayDomain = new URL(websitePageUrl).hostname.replace(/^www\./i, "");
+    } catch {
+      displayDomain = websitePageUrl;
+    }
+  }
+
+  // If there is a Website Page but no explicit Contact Page URL, provide a standard /contact path
+  // if it's different from the contactPageUrl
+  if (websitePageUrl && !contactPageUrl) {
+    try {
+      const parsed = new URL(websitePageUrl);
+      contactPageUrl = `${parsed.origin}/contact`;
+    } catch {
+      // ignore
+    }
+  }
+
+  return {
+    websitePageUrl,
+    contactPageUrl,
+    displayDomain,
+    hasVerifiedContactPage,
+  };
+}
 
 interface LeadProfileModalProps {
   organizationId: string;
   allOrganizationIds?: string[];
   onSelectOrganization?: (id: string) => void;
+  initialTab?: "overview" | "website" | "notes_tasks" | "more";
+  initialSitePage?: "website" | "contact";
   collections: Array<{ id: string; name: string; color: string; scoringConfig?: ScoringConfigJSON }>;
   stages: Array<{ id: string; name: string; color: string }>;
   fieldDefinitions: Array<{
@@ -54,6 +120,8 @@ export function LeadProfileModal({
   organizationId,
   allOrganizationIds = [],
   onSelectOrganization,
+  initialTab = "overview",
+  initialSitePage = "website",
   collections,
   stages,
   fieldDefinitions,
@@ -61,16 +129,13 @@ export function LeadProfileModal({
   onMutated,
   notify,
 }: LeadProfileModalProps) {
-  const [activeTab, setActiveTab] = useState<
-    | "overview"
-    | "contacts"
-    | "opportunities"
-    | "notes"
-    | "activity"
-    | "tasks"
-    | "files"
-    | "source"
-  >("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "website" | "notes_tasks" | "more">(
+    initialTab
+  );
+  const [siteViewerMode, setSiteViewerMode] = useState<"website" | "contact">(initialSitePage);
+  const [customBrowserUrl, setCustomBrowserUrl] = useState<string>("");
+  const [iframeRefreshKey, setIframeRefreshKey] = useState(0);
+
   const [loading, setLoading] = useState(true);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [detail, setDetail] = useState<any>(null);
@@ -166,6 +231,7 @@ export function LeadProfileModal({
           o.observedFacts || "e-commerce store"
         }) and put together a quick breakdown of conversion & AI automation upgrades for your team.`
       );
+      setCustomBrowserUrl("");
     } catch (err) {
       notify(err instanceof Error ? err.message : "Error loading lead", "error");
     } finally {
@@ -193,11 +259,11 @@ export function LeadProfileModal({
       >
         <div
           onClick={(e) => e.stopPropagation()}
-          className="w-full max-w-4xl bg-app-surface border border-app-border rounded-2xl p-6 overflow-y-auto animate-pulse space-y-4 shadow-2xl"
+          className="w-[96vw] max-w-[1440px] h-[88vh] bg-app-surface border border-app-border rounded-3xl p-8 overflow-y-auto animate-pulse space-y-6 shadow-2xl"
         >
-          <div className="h-8 w-64 bg-app-secondary rounded" />
-          <div className="h-4 w-96 bg-app-secondary rounded" />
-          <div className="h-64 bg-app-secondary rounded-xl mt-6" />
+          <div className="h-10 w-80 bg-app-secondary rounded-lg" />
+          <div className="h-5 w-96 bg-app-secondary rounded-lg" />
+          <div className="h-[60vh] bg-app-secondary rounded-2xl mt-8" />
         </div>
       </div>
     );
@@ -212,6 +278,21 @@ export function LeadProfileModal({
   const primaryCol =
     collections.find((c) => memberCollectionIds.includes(c.id)) || collections[0];
   const scoringConfig = primaryCol?.scoringConfig || DEFAULT_SCORING_CONFIG;
+
+  const { websitePageUrl, contactPageUrl, displayDomain, hasVerifiedContactPage } =
+    resolveLeadWebPages(org);
+
+  const activeTargetUrl =
+    customBrowserUrl ||
+    (siteViewerMode === "contact"
+      ? contactPageUrl || websitePageUrl
+      : websitePageUrl || contactPageUrl);
+
+  function openInTabSiteViewer(mode: "website" | "contact", explicitUrl?: string) {
+    setSiteViewerMode(mode);
+    setCustomBrowserUrl(explicitUrl || "");
+    setActiveTab("website");
+  }
 
   async function handleSaveOverview(e: React.FormEvent) {
     e.preventDefault();
@@ -441,7 +522,6 @@ export function LeadProfileModal({
   }
 
   async function handleCreateContentIdeaFromLead() {
-    // Section 19.3: Explicit user action [Create Content Idea From Lead], prefilling factual info without inventing problems
     const res = await fetch("/api/workspace", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -612,7 +692,7 @@ export function LeadProfileModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="lead-profile-heading"
@@ -620,30 +700,31 @@ export function LeadProfileModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-4xl max-h-[92vh] bg-app-surface border border-app-border rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+        className="w-[96vw] max-w-[1440px] h-[92vh] bg-app-surface border border-app-border rounded-3xl flex flex-col overflow-hidden shadow-2xl"
       >
-        {/* Top Centered Card Header + Tinder-Style Controls */}
-        <div className="p-5 border-b border-app-border bg-app-sidebar">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex items-start gap-3.5">
-              <div className="w-12 h-12 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-base flex items-center justify-center shrink-0 shadow-sm">
+        {/* SPACIOUS, UNCLUTTERED TOP HEADER */}
+        <div className="px-6 pt-6 pb-0 border-b border-app-border bg-app-sidebar shrink-0">
+          <div className="flex flex-wrap items-start justify-between gap-4 pb-5">
+            {/* Left: Identity + Website Page & Contact Page Buttons */}
+            <div className="flex items-start gap-4">
+              <div className="w-14 h-14 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-lg flex items-center justify-center shrink-0 shadow-sm">
                 {org.name.slice(0, 2).toUpperCase()}
               </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2.5">
                   <h2
                     id="lead-profile-heading"
-                    className="text-lg font-heading font-bold text-text-primary"
+                    className="text-xl sm:text-2xl font-heading font-bold text-text-primary tracking-tight"
                   >
                     {org.name}
                   </h2>
                   {org.externalId && (
-                    <span className="px-2 py-0.5 rounded bg-app-secondary border border-app-border font-mono text-[11px] text-text-secondary">
+                    <span className="px-2.5 py-0.5 rounded-md bg-app-secondary border border-app-border font-mono text-xs text-text-secondary">
                       {org.externalId}
                     </span>
                   )}
                   <span
-                    className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-semibold ${
+                    className={`px-3 py-0.5 rounded-full text-xs font-heading font-semibold tabular-nums ${
                       org.score !== null && org.score >= 75
                         ? "bg-status-success/15 text-status-success"
                         : org.score !== null && org.score >= 50
@@ -653,77 +734,80 @@ export function LeadProfileModal({
                         : "bg-app-secondary text-text-muted"
                     }`}
                   >
-                    {org.score !== null ? `${org.score} / 100` : "Unscored"}
+                    {org.score !== null ? `Score ${org.score} / 100` : "Unscored"}
                   </span>
                   {org.isBookmarked && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/20 text-accent text-[11px] font-medium">
-                      <Bookmark className="w-3 h-3 fill-current" />
-                      Saved in Design Inspirations
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-accent/20 text-accent text-xs font-medium">
+                      <Bookmark className="w-3.5 h-3.5 fill-current" />
+                      Bookmarked Inspiration
                     </span>
                   )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 text-xs text-text-secondary mt-1">
-                  {org.websiteUrl && org.normalizedDomain ? (
-                    <a
-                      href={
-                        org.websiteUrl.startsWith("http")
-                          ? org.websiteUrl
-                          : `https://${org.websiteUrl}`
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-accent hover:underline font-mono"
-                    >
-                      <Globe className="w-3.5 h-3.5" />
-                      {org.normalizedDomain}
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  ) : (
-                    <span className="text-status-warning font-mono">
-                      No verified website domain
-                    </span>
-                  )}
-                  <span>•</span>
+                {/* Subtitle + Side-by-Side Website Page & Contact Page Buttons (Open in This Tab Only) */}
+                <div className="flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
                   <span>{org.country || "Unknown Country"}</span>
                   {org.market && (
                     <>
                       <span>•</span>
-                      <span>Market: {org.market}</span>
+                      <span>{org.market} Market</span>
                     </>
                   )}
                   {org.industry && (
                     <>
                       <span>•</span>
-                      <span>{org.industry}</span>
+                      <span className="text-text-primary font-medium">{org.industry}</span>
                     </>
+                  )}
+
+                  {/* Always show BOTH Website Page and Contact Page buttons when available, opening in this tab only */}
+                  {websitePageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openInTabSiteViewer("website")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-accent/15 hover:bg-accent text-accent hover:text-white border border-accent/40 text-xs font-semibold transition ml-1"
+                    >
+                      <Globe className="w-3.5 h-3.5" />
+                      Website Page ({displayDomain || "Open in This Tab"})
+                    </button>
+                  )}
+
+                  {contactPageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openInTabSiteViewer("contact")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-app-surface hover:bg-app-elevated text-text-primary border border-app-border text-xs font-semibold transition"
+                    >
+                      <Compass className="w-3.5 h-3.5 text-accent" />
+                      Contact Page {hasVerifiedContactPage ? "(Verified)" : "(In-Tab)"}
+                    </button>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* Tinder-Style Quick Decision, Bookmark, Prev/Next & Stage Controls */}
-            <div className="flex flex-wrap items-center gap-1.5">
+            {/* Right: Tinder-Style Navigation, Pass, Bookmark, Qualify, Stage & Close */}
+            <div className="flex flex-wrap items-center gap-2">
               {allOrganizationIds.length > 1 && onSelectOrganization && (
-                <div className="inline-flex items-center bg-app-surface border border-app-border rounded-lg p-0.5 mr-1">
+                <div className="inline-flex items-center bg-app-surface border border-app-border rounded-xl p-1 mr-1">
                   <button
                     type="button"
                     disabled={!prevOrgId}
                     onClick={() => prevOrgId && onSelectOrganization(prevOrgId)}
                     title="Previous Lead Card"
-                    className="p-1.5 rounded hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
+                    className="p-1.5 rounded-lg hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <span className="px-2 font-mono text-[11px] text-text-muted">
-                    {currentIdx + 1}/{allOrganizationIds.length}
+                  <span className="px-2.5 font-mono text-xs tabular-nums text-text-secondary">
+                    {currentIdx + 1} / {allOrganizationIds.length}
                   </span>
                   <button
                     type="button"
                     disabled={!nextOrgId}
                     onClick={() => nextOrgId && onSelectOrganization(nextOrgId)}
                     title="Next Lead Card"
-                    className="p-1.5 rounded hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
+                    className="p-1.5 rounded-lg hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
@@ -733,34 +817,31 @@ export function LeadProfileModal({
               <button
                 type="button"
                 onClick={() => handleTinderDecision("pass")}
-                title="Pass / Disqualify (Tinder Left)"
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-xs font-semibold transition"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-xs font-semibold transition"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
                 Pass
               </button>
 
               <button
                 type="button"
                 onClick={handleToggleBookmarkInspiration}
-                title="Bookmark Website to Design Inspirations"
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition ${
                   org.isBookmarked
                     ? "bg-accent text-white border-accent"
                     : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
                 }`}
               >
-                <Bookmark className={`w-3.5 h-3.5 ${org.isBookmarked ? "fill-current" : ""}`} />
+                <Bookmark className={`w-4 h-4 ${org.isBookmarked ? "fill-current" : ""}`} />
                 {org.isBookmarked ? "Bookmarked" : "Bookmark Site"}
               </button>
 
               <button
                 type="button"
                 onClick={() => handleTinderDecision("qualify")}
-                title="Qualify & Approve Outreach (Tinder Right)"
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-xs font-semibold transition"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-xs font-semibold transition"
               >
-                <Heart className="w-3.5 h-3.5 fill-current" />
+                <Heart className="w-4 h-4 fill-current" />
                 Qualify
               </button>
 
@@ -768,7 +849,7 @@ export function LeadProfileModal({
                 aria-label="Pipeline Stage"
                 value={activeStage?.id || "stg_new"}
                 onChange={(e) => handleStageChange(e.target.value)}
-                className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-xs font-medium text-text-primary"
+                className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-xs font-medium text-text-primary"
               >
                 {stages.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -779,194 +860,39 @@ export function LeadProfileModal({
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTab("overview");
-                  setIsEditing(!isEditing);
-                }}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                {isEditing ? "Cancel" : "Edit"}
-              </button>
-
-              <button
-                type="button"
                 onClick={onClose}
                 aria-label="Close lead profile"
-                className="p-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
+                className="p-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
           </div>
 
-          {/* Simple Message & Outreach Operations Bar */}
-          <div className="mt-3 pt-3 border-t border-app-border/80 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="font-mono text-[11px] uppercase text-text-muted mr-1 flex items-center gap-1">
-                <MessageSquare className="w-3.5 h-3.5 text-accent" />
-                Message Status:
-              </span>
-              {[
-                { id: "not_messaged", label: "Not Messaged" },
-                { id: "message_sent", label: "✓ Message Sent" },
-                { id: "followup_sent", label: "✓ Follow-up Sent" },
-                { id: "replied", label: "★ Replied" },
-              ].map((st) => {
-                const currentSt = org.messageStatus || "not_messaged";
-                const isActive = currentSt === st.id;
-                return (
-                  <button
-                    key={st.id}
-                    type="button"
-                    onClick={() =>
-                      handleMessageOperation(
-                        st.id as "not_messaged" | "message_sent" | "followup_sent" | "replied"
-                      )
-                    }
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium border transition ${
-                      isActive
-                        ? st.id === "replied"
-                          ? "bg-status-success text-black border-status-success font-semibold"
-                          : st.id === "not_messaged"
-                          ? "bg-app-secondary border-text-muted text-text-primary"
-                          : "bg-accent text-white border-accent font-semibold"
-                        : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                );
-              })}
-              {org.lastMessagedAt && (
-                <span className="text-[11px] font-mono text-text-muted ml-1">
-                  Last: {new Date(org.lastMessagedAt).toLocaleDateString()} (
-                  {org.lastMessageChannel || "Outreach"})
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              {extractedEmail ? (
-                <a
-                  href={`mailto:${extractedEmail}?subject=${encodeURIComponent(
-                    `Quick question for ${org.name}`
-                  )}&body=${encodeURIComponent(quickMessageText)}`}
-                  onClick={() => handleMessageOperation("message_sent", "Email")}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent hover:bg-accent-hover text-white font-semibold"
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  Send Email
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(quickMessageText);
-                    handleMessageOperation("message_sent", "Direct Message");
-                    notify("Outreach message copied & marked as Message Sent", "success");
-                  }}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent hover:bg-accent-hover text-white font-semibold"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  Copy &amp; Mark Sent
-                </button>
-              )}
-
-              {extractedPhone && (
-                <a
-                  href={`https://wa.me/${extractedPhone}?text=${encodeURIComponent(
-                    quickMessageText
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={() => handleMessageOperation("message_sent", "WhatsApp")}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-status-success/20 hover:bg-status-success/30 border border-status-success/40 text-status-success font-semibold"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  WhatsApp
-                </a>
-              )}
-
-              {(org.contactEvidenceValid && org.contactEvidenceUrl) || org.websiteUrl ? (
-                <a
-                  href={
-                    org.contactEvidenceValid && org.contactEvidenceUrl
-                      ? org.contactEvidenceUrl
-                      : org.websiteUrl.startsWith("http")
-                      ? org.websiteUrl
-                      : `https://${org.websiteUrl}`
-                  }
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary"
-                >
-                  <ExternalLink className="w-3.5 h-3.5 text-accent" />
-                  Contact Page
-                </a>
-              ) : null}
-
-              <button
-                type="button"
-                onClick={handleCreateContentIdeaFromLead}
-                title="Create Content Idea from Lead"
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
-              >
-                <Video className="w-3.5 h-3.5 text-accent" />
-                Reel Idea
-              </button>
-            </div>
-          </div>
-
-          {/* Governance & Verification Banner */}
-          <div className="flex flex-wrap items-center gap-2 mt-3 pt-2.5 border-t border-app-border/60 text-[11px] font-mono">
-            <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border text-text-secondary">
-              Source Status: <strong className="text-text-primary">{org.sourceLeadStatus || "candidate"}</strong>
-            </span>
-            <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border text-text-secondary">
-              Qualification: <strong className="text-text-primary">{org.qualificationDecision}</strong>
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded border ${
-                org.outreachApproval === "approved"
-                  ? "bg-status-success/10 border-status-success/30 text-status-success"
-                  : org.outreachApproval === "do not contact"
-                  ? "bg-status-error/10 border-status-error/30 text-status-error"
-                  : "bg-status-warning/10 border-status-warning/30 text-status-warning"
-              }`}
-            >
-              Outreach Approval: <strong>{org.outreachApproval}</strong>
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded border ${
-                org.verificationLevel.toLowerCase().includes("directory")
-                  ? "bg-status-warning/15 border-status-warning/40 text-status-warning"
-                  : "bg-status-success/10 border-status-success/30 text-status-success"
-              }`}
-            >
-              Verification: <strong>{org.verificationLevel}</strong>
-            </span>
-          </div>
-
-          {/* Tabs Navigation */}
-          <div className="flex items-center gap-1 mt-3 -mb-5 overflow-x-auto">
+          {/* 4 CLEAN, SPACIOUS TOP-LEVEL TABS */}
+          <div className="flex items-center gap-2 overflow-x-auto">
             {[
-              { id: "overview", label: "Overview & Message" },
-              { id: "contacts", label: `Contacts (${detail.contacts.length})` },
-              { id: "opportunities", label: `Opportunities (${detail.opportunities.length})` },
-              { id: "notes", label: `Notes (${detail.notes.length})` },
-              { id: "activity", label: `Activity (${detail.activities.length})` },
-              { id: "tasks", label: `Tasks (${detail.tasks.length})` },
-              { id: "files", label: `Files (${detail.attachments.length})` },
-              { id: "source", label: `Source Data (${detail.sourceRecords.length})` },
+              { id: "overview", label: "Overview & Outreach" },
+              {
+                id: "website",
+                label: "Website & Contact Page (In-Tab)",
+              },
+              {
+                id: "notes_tasks",
+                label: `Notes (${detail.notes.length}) & Tasks (${detail.tasks.length})`,
+              },
+              {
+                id: "more",
+                label: `Score, Contacts (${detail.contacts.length}) & Provenance`,
+              },
             ].map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => setActiveTab(t.id as typeof activeTab)}
-                className={`px-3.5 py-2.5 text-xs font-medium border-b-2 transition whitespace-nowrap ${
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition whitespace-nowrap ${
                   activeTab === t.id
-                    ? "border-accent text-accent"
+                    ? "border-accent text-accent font-semibold"
                     : "border-transparent text-text-secondary hover:text-text-primary"
                 }`}
               >
@@ -976,106 +902,57 @@ export function LeadProfileModal({
           </div>
         </div>
 
-        {/* Tab Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {/* Quick Message Composer Box on Overview Tab */}
-          {activeTab === "overview" && (
-            <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Send className="w-3.5 h-3.5 text-accent" />
-                  <span className="text-xs font-heading font-semibold text-text-primary">
-                    Quick Outreach Message &amp; Operations
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <select
-                    value={quickMessageChannel}
-                    onChange={(e) => setQuickMessageChannel(e.target.value)}
-                    aria-label="Message channel"
-                    className="bg-app-surface border border-app-border rounded px-2 py-1 text-xs text-text-primary"
-                  >
-                    <option value="Email">Channel: Email</option>
-                    <option value="WhatsApp">Channel: WhatsApp</option>
-                    <option value="Instagram DM">Channel: Instagram DM</option>
-                    <option value="LinkedIn">Channel: LinkedIn</option>
-                    <option value="Contact Form">Channel: Website Contact Form</option>
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(quickMessageText);
-                      notify("Outreach message copied to clipboard", "info");
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
-                  >
-                    <Copy className="w-3 h-3" />
-                    Copy Text
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleMessageOperation(
-                        "message_sent",
-                        quickMessageChannel,
-                        quickMessageText
-                      )
-                    }
-                    className="inline-flex items-center gap-1 px-3 py-1 rounded bg-accent hover:bg-accent-hover text-white font-semibold"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    Log Message Sent
-                  </button>
-                </div>
-              </div>
-              <textarea
-                rows={2}
-                value={quickMessageText}
-                onChange={(e) => setQuickMessageText(e.target.value)}
-                placeholder="Write or customize your outreach message for this lead..."
-                className="w-full bg-app-surface border border-app-border rounded-lg p-2.5 text-xs text-text-primary"
-              />
-            </div>
-          )}
+        {/* MAIN MODAL BODY */}
+        <div className="flex-1 overflow-y-auto p-6 sm:p-8">
           {/* Warning Banners if Directory-Only or Invalid Contact Evidence URL */}
           {org.verificationLevel.toLowerCase().includes("directory") && (
-            <div className="p-3.5 rounded-xl bg-status-warning/10 border border-status-warning/40 flex items-start gap-3 text-xs text-status-warning">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="mb-6 p-4 rounded-2xl bg-status-warning/10 border border-status-warning/40 flex items-start gap-3 text-sm text-status-warning">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
-                <strong>Directory-Only Listing — Requires Identity &amp; Domain Verification:</strong>{" "}
-                This record was imported from a directory listing without an independently verified website description. Verify the official domain before approving outreach.
+                <strong>Directory-Only Listing — Requires Domain Verification:</strong>{" "}
+                Imported from a directory listing without an independently verified website description. Verify the official domain before outreach.
               </div>
             </div>
           )}
 
           {!org.contactEvidenceValid && org.contactEvidenceUrl && (
-            <div className="p-3.5 rounded-xl bg-status-error/10 border border-status-error/40 flex items-start gap-3 text-xs text-status-error">
-              <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="mb-6 p-4 rounded-2xl bg-status-error/10 border border-status-error/40 flex items-start gap-3 text-sm text-status-error">
+              <ShieldAlert className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <strong>Source Data Anomaly in Contact Evidence URL:</strong> Raw value{" "}
-                <code className="px-1.5 py-0.5 rounded bg-app-secondary font-mono">
+                <code className="px-2 py-0.5 rounded bg-app-secondary font-mono">
                   {org.contactEvidenceUrl}
                 </code>{" "}
-                is not a valid URL ({org.contactEvidenceWarning}). Clickable link generation is disabled and this value has not been interpreted as confirmed outreach.
+                is not a valid URL ({org.contactEvidenceWarning}). Clickable link generation is disabled.
               </div>
             </div>
           )}
 
-          {/* TAB 1: OVERVIEW */}
+          {/* TAB 1: OVERVIEW & OUTREACH (BIG, CLEAN, UNCLUTTERED) */}
           {activeTab === "overview" && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-              <div className="lg:col-span-2 space-y-5">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-7">
+              {/* Left 8 Columns: Business Evidence + Unified Outreach Operations */}
+              <div className="lg:col-span-8 space-y-6">
                 {isEditing ? (
                   <form
                     onSubmit={handleSaveOverview}
-                    className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-4"
+                    className="bg-app-secondary border border-app-border rounded-2xl p-6 space-y-5"
                   >
-                    <h3 className="text-sm font-heading font-semibold text-text-primary">
-                      Edit Lead &amp; Governance Details
-                    </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-base font-heading font-bold text-text-primary">
+                        Edit Lead &amp; Governance Details
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditing(false)}
+                        className="text-xs text-text-secondary hover:text-text-primary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div>
-                        <label htmlFor="edit-name" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-name" className="block text-text-secondary mb-1.5">
                           Company Name *
                         </label>
                         <input
@@ -1084,59 +961,35 @@ export function LeadProfileModal({
                           required
                           value={editName}
                           onChange={(e) => setEditName(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-website" className="block text-text-secondary mb-1">
-                          Official Website
+                        <label htmlFor="edit-website" className="block text-text-secondary mb-1.5">
+                          Website Page URL
                         </label>
                         <input
                           id="edit-website"
                           type="text"
                           value={editWebsite}
                           onChange={(e) => setEditWebsite(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-country" className="block text-text-secondary mb-1">
-                          Country
+                        <label htmlFor="edit-evidence" className="block text-text-secondary mb-1.5">
+                          Contact Page / Evidence URL
                         </label>
                         <input
-                          id="edit-country"
+                          id="edit-evidence"
                           type="text"
-                          value={editCountry}
-                          onChange={(e) => setEditCountry(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          value={editContactEvidenceUrl}
+                          onChange={(e) => setEditContactEvidenceUrl(e.target.value)}
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-market" className="block text-text-secondary mb-1">
-                          Market
-                        </label>
-                        <input
-                          id="edit-market"
-                          type="text"
-                          value={editMarket}
-                          onChange={(e) => setEditMarket(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="edit-niche" className="block text-text-secondary mb-1">
-                          Niche / Industry
-                        </label>
-                        <input
-                          id="edit-niche"
-                          type="text"
-                          value={editIndustry}
-                          onChange={(e) => setEditIndustry(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                        />
-                      </div>
-                      <div>
-                        <label htmlFor="edit-contact" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-contact" className="block text-text-secondary mb-1.5">
                           Published Business Contact
                         </label>
                         <input
@@ -1144,30 +997,54 @@ export function LeadProfileModal({
                           type="text"
                           value={editPublishedContact}
                           onChange={(e) => setEditPublishedContact(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-evidence" className="block text-text-secondary mb-1">
-                          Contact Evidence URL
+                        <label htmlFor="edit-country" className="block text-text-secondary mb-1.5">
+                          Country
                         </label>
                         <input
-                          id="edit-evidence"
+                          id="edit-country"
                           type="text"
-                          value={editContactEvidenceUrl}
-                          onChange={(e) => setEditContactEvidenceUrl(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          value={editCountry}
+                          onChange={(e) => setEditCountry(e.target.value)}
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-qual" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-market" className="block text-text-secondary mb-1.5">
+                          Market
+                        </label>
+                        <input
+                          id="edit-market"
+                          type="text"
+                          value={editMarket}
+                          onChange={(e) => setEditMarket(e.target.value)}
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="edit-niche" className="block text-text-secondary mb-1.5">
+                          Niche / Industry
+                        </label>
+                        <input
+                          id="edit-niche"
+                          type="text"
+                          value={editIndustry}
+                          onChange={(e) => setEditIndustry(e.target.value)}
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="edit-qual" className="block text-text-secondary mb-1.5">
                           Qualification Decision
                         </label>
                         <select
                           id="edit-qual"
                           value={editQualification}
                           onChange={(e) => setEditQualification(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         >
                           <option value="not reviewed">not reviewed</option>
                           <option value="qualified">qualified</option>
@@ -1176,14 +1053,14 @@ export function LeadProfileModal({
                         </select>
                       </div>
                       <div>
-                        <label htmlFor="edit-outreach" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-outreach" className="block text-text-secondary mb-1.5">
                           Outreach Approval
                         </label>
                         <select
                           id="edit-outreach"
                           value={editOutreachApproval}
                           onChange={(e) => setEditOutreachApproval(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         >
                           <option value="not approved">not approved</option>
                           <option value="approved">approved</option>
@@ -1191,14 +1068,14 @@ export function LeadProfileModal({
                         </select>
                       </div>
                       <div>
-                        <label htmlFor="edit-verif" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-verif" className="block text-text-secondary mb-1.5">
                           Verification Level
                         </label>
                         <select
                           id="edit-verif"
                           value={editVerification}
                           onChange={(e) => setEditVerification(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         >
                           <option value="site description">site description</option>
                           <option value="directory listing only">directory listing only</option>
@@ -1206,7 +1083,7 @@ export function LeadProfileModal({
                         </select>
                       </div>
                       <div>
-                        <label htmlFor="edit-cats" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-cats" className="block text-text-secondary mb-1.5">
                           Categories (comma-separated)
                         </label>
                         <input
@@ -1214,11 +1091,11 @@ export function LeadProfileModal({
                           type="text"
                           value={editCategories}
                           onChange={(e) => setEditCategories(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                       <div>
-                        <label htmlFor="edit-tags" className="block text-text-secondary mb-1">
+                        <label htmlFor="edit-tags" className="block text-text-secondary mb-1.5">
                           Tags (comma-separated)
                         </label>
                         <input
@@ -1226,13 +1103,13 @@ export function LeadProfileModal({
                           type="text"
                           value={editTags}
                           onChange={(e) => setEditTags(e.target.value)}
-                          className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                          className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                         />
                       </div>
                     </div>
 
-                    <div className="text-xs">
-                      <label htmlFor="edit-facts" className="block text-text-secondary mb-1">
+                    <div className="text-sm">
+                      <label htmlFor="edit-facts" className="block text-text-secondary mb-1.5">
                         Observed Business Facts (from site)
                       </label>
                       <textarea
@@ -1240,17 +1117,16 @@ export function LeadProfileModal({
                         rows={3}
                         value={editObservedFacts}
                         onChange={(e) => setEditObservedFacts(e.target.value)}
-                        className="w-full bg-app-surface border border-app-border rounded-lg p-2.5 text-text-primary"
+                        className="w-full bg-app-surface border border-app-border rounded-xl p-3.5 text-text-primary"
                       />
                     </div>
 
-                    {/* Custom Fields Section */}
                     {applicableCustomFields.length > 0 && (
-                      <div className="pt-3 border-t border-app-border space-y-2">
+                      <div className="pt-4 border-t border-app-border space-y-3">
                         <div className="text-xs font-mono uppercase text-text-muted">
                           Collection Custom Fields
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                           {applicableCustomFields.map((cf) => (
                             <div key={cf.id}>
                               <label className="block text-text-secondary mb-1">{cf.name}</label>
@@ -1263,7 +1139,7 @@ export function LeadProfileModal({
                                     [cf.key]: e.target.value,
                                   }))
                                 }
-                                className="w-full bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                                className="w-full bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
                               />
                             </div>
                           ))}
@@ -1271,229 +1147,346 @@ export function LeadProfileModal({
                       </div>
                     )}
 
-                    <div className="flex justify-end gap-2 pt-2">
+                    <div className="flex justify-end gap-3 pt-2">
                       <button
                         type="button"
                         onClick={() => setIsEditing(false)}
-                        className="px-3.5 py-1.5 rounded-lg bg-app-surface border border-app-border text-xs text-text-secondary"
+                        className="px-4 py-2 rounded-xl bg-app-surface border border-app-border text-sm text-text-secondary"
                       >
                         Cancel
                       </button>
                       <button
                         type="submit"
-                        className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
+                        className="px-5 py-2 rounded-xl bg-accent text-white text-sm font-semibold"
                       >
                         Save Changes
                       </button>
                     </div>
                   </form>
                 ) : (
-                  <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-4">
+                  <div className="bg-app-secondary border border-app-border rounded-2xl p-6 space-y-6">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-mono uppercase text-text-muted">
-                        Basic Information &amp; Site Evidence
+                      <h3 className="text-base font-heading font-bold text-text-primary">
+                        Storefront &amp; Contact Intelligence
                       </h3>
                       <button
                         type="button"
                         onClick={() => setIsEditing(true)}
-                        className="text-xs text-accent hover:underline"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
                       >
-                        Edit Fields
+                        <Edit3 className="w-3.5 h-3.5" />
+                        Edit Details
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
-                      <div>
-                        <span className="text-text-muted block">Company Name</span>
-                        <strong className="text-text-primary">{org.name}</strong>
+                    {/* Prominent Observed Facts Box */}
+                    <div className="bg-app-surface border border-app-border rounded-2xl p-5 space-y-2">
+                      <div className="text-xs font-mono uppercase text-text-muted">
+                        Observed Business Facts (from Website)
                       </div>
-                      <div>
-                        <span className="text-text-muted block">Website</span>
-                        <span className="font-mono text-text-primary">
-                          {org.websiteUrl || "Not available"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-text-muted block">Country / Market</span>
-                        <span className="text-text-primary">
-                          {org.country || "—"} ({org.market || "—"})
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-text-muted block">Niche / Industry</span>
-                        <span className="text-text-primary">{org.industry || "—"}</span>
-                      </div>
-                      <div>
-                        <span className="text-text-muted block">Published Contact</span>
-                        <span className="font-mono text-text-primary">
-                          {org.publishedContact || "Unknown"}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-text-muted block">Contact Evidence URL</span>
-                        {org.contactEvidenceUrl ? (
-                          org.contactEvidenceValid ? (
-                            <a
-                              href={org.contactEvidenceUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-accent hover:underline font-mono truncate block"
-                            >
-                              {org.contactEvidenceUrl}
-                            </a>
-                          ) : (
-                            <span className="text-status-error font-mono">
-                              {org.contactEvidenceUrl} (Invalid URL)
-                            </span>
-                          )
-                        ) : (
-                          <span className="text-text-muted">—</span>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="pt-3 border-t border-app-border">
-                      <div className="text-xs text-text-muted mb-1">
-                        Observed Fact (from site)
-                      </div>
-                      <p className="text-xs text-text-primary bg-app-surface p-3 rounded-lg border border-app-border leading-relaxed">
+                      <p className="text-base text-text-primary leading-relaxed">
                         {org.observedFacts || "No site observations recorded yet."}
                       </p>
                     </div>
 
-                    {org.sourceNotes && (
-                      <div>
-                        <div className="text-xs text-text-muted mb-1">Source Ledger Notes</div>
-                        <p className="text-xs text-text-secondary bg-app-surface p-2.5 rounded-lg border border-app-border">
-                          {org.sourceNotes}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Collections Membership Pills */}
-                    <div className="pt-3 border-t border-app-border">
-                      <div className="text-xs text-text-muted mb-2">
-                        Collection Memberships (Shared Company Record)
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {collections.map((c) => {
-                          const active = memberCollectionIds.includes(c.id);
-                          return (
+                    {/* Side-by-side Website Page & Contact Page Cards (Always Both When Contact Page Exists) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="p-4 rounded-2xl bg-app-surface border border-app-border flex flex-col justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-mono uppercase text-text-muted block">
+                            Official Website Page
+                          </span>
+                          <span className="font-mono text-sm text-text-primary mt-1 block break-all">
+                            {websitePageUrl || "Not available"}
+                          </span>
+                        </div>
+                        {websitePageUrl && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
                             <button
-                              key={c.id}
                               type="button"
-                              onClick={() => handleToggleCollectionMembership(c.id)}
-                              className={`px-2.5 py-1 rounded-md text-xs font-medium border transition ${
-                                active
-                                  ? "bg-accent/15 border-accent text-accent"
-                                  : "bg-app-surface border-app-border text-text-muted hover:text-text-primary"
-                              }`}
+                              onClick={() => openInTabSiteViewer("website")}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold transition"
                             >
-                              {active ? "✓ " : "+ "}
-                              {c.name}
+                              <Globe className="w-3.5 h-3.5" />
+                              Open Website Page (In-Tab)
                             </button>
-                          );
-                        })}
+                            <a
+                              href={websitePageUrl}
+                              target="_self"
+                              className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-app-secondary hover:bg-app-elevated border border-app-border text-xs text-text-secondary hover:text-text-primary"
+                            >
+                              Navigate This Tab
+                            </a>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-4 rounded-2xl bg-app-surface border border-app-border flex flex-col justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-mono uppercase text-text-muted block">
+                            Contact Page &amp; Published Contact
+                          </span>
+                          <span className="font-mono text-sm text-text-primary mt-1 block break-all">
+                            {org.publishedContact || "No email/phone listed"}
+                          </span>
+                          {contactPageUrl && (
+                            <span className="font-mono text-xs text-text-secondary mt-1 block break-all">
+                              {contactPageUrl}
+                            </span>
+                          )}
+                        </div>
+                        {contactPageUrl && (
+                          <div className="flex flex-wrap items-center gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => openInTabSiteViewer("contact")}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-app-secondary hover:bg-app-elevated border border-accent/40 text-accent text-xs font-semibold transition"
+                            >
+                              <Compass className="w-3.5 h-3.5" />
+                              Open Contact Page (In-Tab)
+                            </button>
+                            {websitePageUrl && (
+                              <button
+                                type="button"
+                                onClick={() => openInTabSiteViewer("website")}
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-app-secondary hover:bg-app-elevated border border-app-border text-xs text-text-secondary hover:text-text-primary"
+                              >
+                                <Globe className="w-3.5 h-3.5" />
+                                Website Page
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Clean Metadata Grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-2 text-sm">
+                      <div className="p-3.5 rounded-xl bg-app-surface border border-app-border">
+                        <span className="text-xs text-text-muted block">Country &amp; Market</span>
+                        <strong className="text-text-primary mt-0.5 block">
+                          {org.country || "—"} ({org.market || "—"})
+                        </strong>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-app-surface border border-app-border">
+                        <span className="text-xs text-text-muted block">Niche / Industry</span>
+                        <strong className="text-text-primary mt-0.5 block">
+                          {org.industry || "—"}
+                        </strong>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-app-surface border border-app-border">
+                        <span className="text-xs text-text-muted block">Qualification</span>
+                        <strong className="text-text-primary font-mono text-xs mt-0.5 block">
+                          {org.qualificationDecision}
+                        </strong>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-app-surface border border-app-border">
+                        <span className="text-xs text-text-muted block">Outreach Approval</span>
+                        <strong
+                          className={`font-mono text-xs mt-0.5 block ${
+                            org.outreachApproval === "approved"
+                              ? "text-status-success"
+                              : org.outreachApproval === "do not contact"
+                              ? "text-status-error"
+                              : "text-status-warning"
+                          }`}
+                        >
+                          {org.outreachApproval}
+                        </strong>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Configurable Opportunity Scoring Card (Section 14) */}
-                <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* SINGLE UNIFIED OUTREACH & MESSAGE OPERATIONS CARD */}
+                <div className="bg-app-secondary border border-app-border rounded-2xl p-6 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <Sliders className="w-4 h-4 text-accent" />
-                      <h3 className="text-xs font-mono uppercase text-text-primary">
-                        Opportunity Score Assessment ({primaryCol?.name || "Default"})
+                      <MessageSquare className="w-4 h-4 text-accent" />
+                      <h3 className="text-base font-heading font-bold text-text-primary">
+                        Outreach &amp; Message Operations
                       </h3>
                     </div>
-                    <span className="text-xs font-mono text-text-secondary">
-                      Origin: <strong>{org.scoreMethod}</strong>
-                    </span>
+
+                    {/* Message Status Pills */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: "not_messaged", label: "Not Messaged" },
+                        { id: "message_sent", label: "✓ Message Sent" },
+                        { id: "followup_sent", label: "✓ Follow-up Sent" },
+                        { id: "replied", label: "★ Replied" },
+                      ].map((st) => {
+                        const currentSt = org.messageStatus || "not_messaged";
+                        const isActive = currentSt === st.id;
+                        return (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() =>
+                              handleMessageOperation(
+                                st.id as
+                                  | "not_messaged"
+                                  | "message_sent"
+                                  | "followup_sent"
+                                  | "replied"
+                              )
+                            }
+                            className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+                              isActive
+                                ? st.id === "replied"
+                                  ? "bg-status-success text-black border-status-success font-semibold"
+                                  : st.id === "not_messaged"
+                                  ? "bg-app-surface border-text-muted text-text-primary"
+                                  : "bg-accent text-white border-accent font-semibold"
+                                : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            {st.label}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {scoringConfig.dimensions.map((dim) => (
-                      <div
-                        key={dim.key}
-                        className="p-2.5 rounded-lg bg-app-surface border border-app-border text-xs"
+                  <textarea
+                    rows={3}
+                    value={quickMessageText}
+                    onChange={(e) => setQuickMessageText(e.target.value)}
+                    placeholder="Write or customize your outreach message for this lead..."
+                    className="w-full bg-app-surface border border-app-border rounded-xl p-3.5 text-sm text-text-primary leading-relaxed"
+                  />
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={quickMessageChannel}
+                        onChange={(e) => setQuickMessageChannel(e.target.value)}
+                        aria-label="Message channel"
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-xs text-text-primary"
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-medium text-text-primary">{dim.label}</span>
-                          <span className="font-mono text-text-muted">{dim.weight}% wt</span>
-                        </div>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          placeholder="0 - 100"
-                          value={scoreBreakdown[dim.key] ?? ""}
-                          onChange={(e) =>
-                            setScoreBreakdown((prev) => ({
-                              ...prev,
-                              [dim.key]: Number(e.target.value),
-                            }))
-                          }
-                          className="w-full bg-app-secondary border border-app-border rounded px-2 py-1 text-xs font-mono text-text-primary"
-                        />
-                      </div>
-                    ))}
-                  </div>
+                        <option value="Email">Channel: Email</option>
+                        <option value="WhatsApp">Channel: WhatsApp</option>
+                        <option value="Instagram DM">Channel: Instagram DM</option>
+                        <option value="LinkedIn">Channel: LinkedIn</option>
+                        <option value="Contact Form">Channel: Website Contact Form</option>
+                      </select>
 
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-app-border">
-                    <button
-                      type="button"
-                      onClick={() => handleSaveScore(false)}
-                      className="px-3.5 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold"
-                    >
-                      Calculate Weighted Score
-                    </button>
-
-                    <div className="flex items-center gap-2">
-                      <label htmlFor="manual-score" className="text-xs text-text-secondary">
-                        Manual Score Override (0–100):
-                      </label>
-                      <input
-                        id="manual-score"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={manualScoreInput}
-                        onChange={(e) => setManualScoreInput(e.target.value)}
-                        className="w-20 bg-app-surface border border-app-border rounded px-2 py-1 text-xs font-mono text-text-primary"
-                      />
                       <button
                         type="button"
-                        onClick={() => handleSaveScore(true)}
-                        className="px-3 py-1.5 rounded-lg bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(quickMessageText);
+                          notify("Outreach message copied to clipboard", "info");
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-secondary hover:text-text-primary"
                       >
-                        Override
+                        <Copy className="w-3.5 h-3.5" />
+                        Copy Text
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {extractedEmail && (
+                        <a
+                          href={`mailto:${extractedEmail}?subject=${encodeURIComponent(
+                            `Quick question for ${org.name}`
+                          )}&body=${encodeURIComponent(quickMessageText)}`}
+                          onClick={() => handleMessageOperation("message_sent", "Email")}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-semibold text-text-primary"
+                        >
+                          <Mail className="w-3.5 h-3.5 text-accent" />
+                          Email Client
+                        </a>
+                      )}
+
+                      {extractedPhone && (
+                        <a
+                          href={`https://wa.me/${extractedPhone}?text=${encodeURIComponent(
+                            quickMessageText
+                          )}`}
+                          target="_self"
+                          onClick={() => handleMessageOperation("message_sent", "WhatsApp")}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-status-success/20 hover:bg-status-success/30 border border-status-success/40 text-status-success text-xs font-semibold"
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          WhatsApp
+                        </a>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(quickMessageText);
+                          handleMessageOperation(
+                            "message_sent",
+                            quickMessageChannel,
+                            quickMessageText
+                          );
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold shadow-sm"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        Copy &amp; Log Message Sent
                       </button>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Right Column: Next Action & Recent Activity */}
-              <div className="space-y-4">
-                <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-2">
+              {/* Right 4 Columns: Collections, Next Action & Recent Activity */}
+              <div className="lg:col-span-4 space-y-6">
+                <div className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3">
                   <div className="text-xs font-mono uppercase text-text-muted">Next Action</div>
-                  <p className="text-xs font-medium text-text-primary">
+                  <p className="text-sm font-medium text-text-primary leading-relaxed">
                     {org.nextAction || "Review qualification & site evidence"}
                   </p>
                   {org.nextFollowUpAt && (
-                    <div className="text-[11px] font-mono text-accent">
+                    <div className="text-xs font-mono text-accent">
                       Due: {new Date(org.nextFollowUpAt).toLocaleDateString()}
                     </div>
                   )}
+                  <div className="pt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCreateContentIdeaFromLead}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
+                    >
+                      <Video className="w-3.5 h-3.5 text-accent" />
+                      Create Reel / Audit Idea
+                    </button>
+                  </div>
                 </div>
 
-                <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3">
+                <div className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3">
+                  <div className="text-xs font-mono uppercase text-text-muted">
+                    Collection Memberships
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {collections.map((c) => {
+                      const active = memberCollectionIds.includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => handleToggleCollectionMembership(c.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+                            active
+                              ? "bg-accent/15 border-accent text-accent"
+                              : "bg-app-surface border-app-border text-text-muted hover:text-text-primary"
+                          }`}
+                        >
+                          {active ? "✓ " : "+ "}
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3">
                   <div className="text-xs font-mono uppercase text-text-muted">
                     Recent Record Activity
                   </div>
-                  <div className="space-y-2.5 max-h-72 overflow-y-auto">
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                     {detail.activities.length === 0 ? (
                       <p className="text-xs text-text-muted">No activity recorded yet.</p>
                     ) : (
@@ -1501,10 +1494,10 @@ export function LeadProfileModal({
                       detail.activities.slice(0, 8).map((act: any) => (
                         <div
                           key={act.id}
-                          className="text-xs border-l-2 border-accent pl-2.5 py-0.5"
+                          className="text-xs border-l-2 border-accent pl-3 py-1"
                         >
                           <div className="text-text-primary font-medium">{act.title}</div>
-                          <div className="text-[10px] font-mono text-text-muted">
+                          <div className="text-[11px] font-mono text-text-muted mt-0.5">
                             {act.actorOrigin.toUpperCase()} •{" "}
                             {new Date(act.createdAt).toLocaleString()}
                           </div>
@@ -1517,564 +1510,644 @@ export function LeadProfileModal({
             </div>
           )}
 
-          {/* TAB 2: CONTACTS */}
-          {activeTab === "contacts" && (
-            <div className="space-y-5">
-              <form
-                onSubmit={handleCreateContact}
-                className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3"
-              >
-                <h3 className="text-xs font-mono uppercase text-text-primary">
-                  Add Contact for {org.name}
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Full Name *"
-                    value={newContactName}
-                    onChange={(e) => setNewContactName(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Job Title (e.g. Founder)"
-                    value={newContactRole}
-                    onChange={(e) => setNewContactRole(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <input
-                    type="email"
-                    placeholder="Business Email"
-                    value={newContactEmail}
-                    onChange={(e) => setNewContactEmail(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Phone"
-                    value={newContactPhone}
-                    onChange={(e) => setNewContactPhone(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
+          {/* TAB 2: LIVE WEBSITE & CONTACT PAGE VIEWER (OPENS IN THIS TAB ONLY) */}
+          {activeTab === "website" && (
+            <div className="flex flex-col h-[72vh] bg-app-secondary border border-app-border rounded-2xl overflow-hidden">
+              {/* In-Tab Browser Bar */}
+              <div className="p-3.5 bg-app-sidebar border-b border-app-border flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Website Page Button */}
+                  {websitePageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSiteViewerMode("website");
+                        setCustomBrowserUrl("");
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+                        siteViewerMode === "website" && !customBrowserUrl
+                          ? "bg-accent text-white border-accent shadow-sm"
+                          : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
+                      }`}
+                    >
+                      <Globe className="w-4 h-4" />
+                      Website Page
+                    </button>
+                  )}
+
+                  {/* Contact Page Button */}
+                  {contactPageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSiteViewerMode("contact");
+                        setCustomBrowserUrl("");
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+                        siteViewerMode === "contact" && !customBrowserUrl
+                          ? "bg-accent text-white border-accent shadow-sm"
+                          : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
+                      }`}
+                    >
+                      <Compass className="w-4 h-4" />
+                      Contact Page {hasVerifiedContactPage ? "(Verified)" : ""}
+                    </button>
+                  )}
                 </div>
-                <div className="flex items-center justify-between">
-                  <label className="inline-flex items-center gap-2 text-xs text-text-secondary">
-                    <input
-                      type="checkbox"
-                      checked={newContactDnc}
-                      onChange={(e) => setNewContactDnc(e.target.checked)}
-                    />
-                    Mark as Do Not Contact (Suppress Outreach)
-                  </label>
+
+                {/* Address Bar */}
+                <div className="flex-1 min-w-[260px] flex items-center gap-2 bg-app-surface border border-app-border rounded-xl px-3 py-1.5">
+                  <Globe className="w-3.5 h-3.5 text-accent shrink-0" />
+                  <input
+                    type="text"
+                    value={activeTargetUrl || ""}
+                    onChange={(e) => setCustomBrowserUrl(e.target.value)}
+                    placeholder="https://..."
+                    className="w-full bg-transparent font-mono text-xs text-text-primary focus:outline-none"
+                  />
                   <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
+                    type="button"
+                    onClick={() => setIframeRefreshKey((k) => k + 1)}
+                    title="Reload Page in This Tab"
+                    className="p-1 rounded hover:bg-app-secondary text-text-secondary hover:text-text-primary"
                   >
-                    + Save Contact
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
-              </form>
 
-              <div className="space-y-3">
-                {detail.contacts.length === 0 ? (
-                  <div className="p-6 text-center bg-app-secondary border border-app-border rounded-xl text-xs text-text-secondary">
-                    No individual contacts stored yet. Published business contact on record:{" "}
-                    <strong className="font-mono text-text-primary">
-                      {org.publishedContact || "Unknown"}
-                    </strong>
-                  </div>
-                ) : (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  detail.contacts.map((c: any) => (
-                    <div
-                      key={c.id}
-                      className="p-4 rounded-xl bg-app-secondary border border-app-border flex flex-wrap items-center justify-between gap-3 text-xs"
+                {/* Same-Tab Actions (No New Tab) */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(quickMessageText);
+                      handleMessageOperation("message_sent", "Contact Form", quickMessageText);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-accent/15 hover:bg-accent text-accent hover:text-white border border-accent/30 text-xs font-semibold transition"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    Copy Msg &amp; Mark Sent
+                  </button>
+
+                  {activeTargetUrl && (
+                    <a
+                      href={activeTargetUrl}
+                      target="_self"
+                      title="Navigate current browser tab directly to this URL (does not open a new tab)"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-secondary hover:text-text-primary"
                     >
-                      <div>
-                        <div className="font-heading font-semibold text-sm text-text-primary flex items-center gap-2">
-                          {c.fullName}
-                          {c.doNotContact && (
-                            <span className="px-2 py-0.5 rounded bg-status-error/15 text-status-error text-[10px] font-mono">
-                              DO NOT CONTACT
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-text-secondary mt-0.5">
-                          {c.jobTitle || "Role unknown"} • {c.email || "No email"} •{" "}
-                          {c.phone || "No phone"}
-                        </div>
-                      </div>
-                      <span className="font-mono text-[11px] text-text-muted">
-                        Approval: {c.approvalStatus}
-                      </span>
-                    </div>
-                  ))
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      Navigate This Tab
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Embedded Live Website / Contact Page Frame */}
+              <div className="flex-1 bg-white relative">
+                {activeTargetUrl ? (
+                  <iframe
+                    key={`${activeTargetUrl}-${iframeRefreshKey}`}
+                    src={`/api/site-preview?url=${encodeURIComponent(activeTargetUrl)}`}
+                    title={`${org.name} — ${
+                      siteViewerMode === "contact" ? "Contact Page" : "Website Page"
+                    }`}
+                    className="w-full h-full border-0"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                  />
+                ) : (
+                  <div className="h-full bg-app-surface flex flex-col items-center justify-center p-8 text-center space-y-3">
+                    <Globe className="w-10 h-10 text-text-muted" />
+                    <p className="text-base font-heading font-semibold text-text-primary">
+                      No Website or Contact Page URL on Record
+                    </p>
+                    <p className="text-xs text-text-secondary max-w-md">
+                      Add an official website URL or contact page URL in the Overview tab to browse it directly inside this tab.
+                    </p>
+                  </div>
                 )}
               </div>
             </div>
           )}
 
-          {/* TAB 3: OPPORTUNITIES */}
-          {activeTab === "opportunities" && (
-            <div className="space-y-5">
-              <form
-                onSubmit={handleCreateOpportunity}
-                className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3"
-              >
-                <h3 className="text-xs font-mono uppercase text-text-primary">
-                  Create Opportunity for {org.name} (Supports Multiple Opportunities per Company)
+          {/* TAB 3: NOTES & FOLLOW-UP TASKS (SIDE-BY-SIDE 2-COLUMN) */}
+          {activeTab === "notes_tasks" && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
+              {/* Left: Notes */}
+              <div className="space-y-4">
+                <h3 className="text-base font-heading font-bold text-text-primary">
+                  Research Notes &amp; Audit Findings ({detail.notes.length})
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <input
-                    type="text"
+                <form
+                  onSubmit={handleAddNote}
+                  className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3"
+                >
+                  <textarea
+                    rows={3}
                     required
-                    placeholder="Opportunity Name (e.g. Storefront Redesign) *"
-                    value={newOppName}
-                    onChange={(e) => setNewOppName(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
+                    placeholder="Write detailed research note, website audit findings, or conversation summary..."
+                    value={newNoteText}
+                    onChange={(e) => setNewNoteText(e.target.value)}
+                    className="w-full bg-app-surface border border-app-border rounded-xl p-3.5 text-sm text-text-primary"
                   />
-                  <input
-                    type="text"
-                    placeholder="Service Type (e.g. Web Dev / AI)"
-                    value={newOppService}
-                    onChange={(e) => setNewOppService(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <select
-                    value={newOppStage}
-                    onChange={(e) => setNewOppStage(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  >
-                    {stages.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        Stage: {s.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    placeholder="Estimated Value (leave blank if unknown)"
-                    value={newOppValue}
-                    onChange={(e) => setNewOppValue(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <select
-                    value={newOppCurrency}
-                    onChange={(e) => setNewOppCurrency(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  >
-                    <option value="INR">INR (₹)</option>
-                    <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="GBP">GBP (£)</option>
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Next Action"
-                    value={newOppNextAction}
-                    onChange={(e) => setNewOppNextAction(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
-                  >
-                    + Add Opportunity
-                  </button>
-                </div>
-              </form>
-
-              <div className="space-y-3">
-                {detail.opportunities.length === 0 ? (
-                  <div className="p-6 text-center bg-app-secondary border border-app-border rounded-xl text-xs text-text-secondary">
-                    No active sales opportunities created for this organization yet.
+                  <div className="flex items-center justify-between">
+                    <label className="inline-flex items-center gap-2 text-xs text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={newNotePinned}
+                        onChange={(e) => setNewNotePinned(e.target.checked)}
+                      />
+                      Pin important note to top
+                    </label>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-semibold"
+                    >
+                      Save Note
+                    </button>
                   </div>
-                ) : (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  detail.opportunities.map((opp: any) => {
-                    const stg = stages.find((s) => s.id === opp.stageId);
-                    return (
+                </form>
+
+                <div className="space-y-3">
+                  {detail.notes.length === 0 ? (
+                    <p className="text-sm text-text-secondary text-center py-8 bg-app-secondary border border-app-border rounded-2xl">
+                      No user notes added yet.
+                    </p>
+                  ) : (
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    detail.notes.map((n: any) => (
+                      <div
+                        key={n.id}
+                        className={`p-4 rounded-2xl border text-sm space-y-2 ${
+                          n.isPinned
+                            ? "bg-accent/10 border-accent/40"
+                            : "bg-app-secondary border-app-border"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-mono text-text-muted">
+                          <span className="flex items-center gap-1.5">
+                            {n.isPinned && <Pin className="w-3.5 h-3.5 text-accent" />}
+                            {n.origin.toUpperCase()} NOTE •{" "}
+                            {new Date(n.createdAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-text-primary whitespace-pre-wrap leading-relaxed">
+                          {n.content}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Follow-Up Tasks */}
+              <div className="space-y-4">
+                <h3 className="text-base font-heading font-bold text-text-primary">
+                  Follow-ups &amp; Scheduled Tasks ({detail.tasks.length})
+                </h3>
+                <form
+                  onSubmit={handleCreateTask}
+                  className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3"
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                    <input
+                      type="text"
+                      required
+                      placeholder="Task / Follow-up Title *"
+                      value={newTaskTitle}
+                      onChange={(e) => setNewTaskTitle(e.target.value)}
+                      className="sm:col-span-2 bg-app-surface border border-app-border rounded-xl px-3.5 py-2 text-text-primary"
+                    />
+                    <select
+                      value={newTaskType}
+                      onChange={(e) => setNewTaskType(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    >
+                      <option value="Follow-up">Follow-up</option>
+                      <option value="Research">Research / Audit</option>
+                      <option value="Email">Email</option>
+                      <option value="Call">Call</option>
+                      <option value="Proposal">Proposal</option>
+                    </select>
+                    <select
+                      value={newTaskPriority}
+                      onChange={(e) => setNewTaskPriority(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    >
+                      <option value="high">High Priority</option>
+                      <option value="medium">Medium Priority</option>
+                      <option value="low">Low Priority</option>
+                    </select>
+                    <input
+                      type="date"
+                      value={newTaskDate}
+                      onChange={(e) => setNewTaskDate(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    />
+                    <input
+                      type="time"
+                      value={newTaskTime}
+                      onChange={(e) => setNewTaskTime(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-accent text-white text-xs font-semibold"
+                    >
+                      Schedule Task
+                    </button>
+                  </div>
+                </form>
+
+                <div className="space-y-3">
+                  {detail.tasks.length === 0 ? (
+                    <p className="text-sm text-text-secondary text-center py-8 bg-app-secondary border border-app-border rounded-2xl">
+                      No tasks scheduled for this record.
+                    </p>
+                  ) : (
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    detail.tasks.map((t: any) => (
+                      <div
+                        key={t.id}
+                        className="p-4 rounded-2xl bg-app-secondary border border-app-border flex items-center justify-between gap-3 text-sm"
+                      >
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={t.status === "Completed"}
+                            onChange={async () => {
+                              await fetch("/api/workspace", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  action: "toggle_task_status",
+                                  payload: { id: t.id },
+                                }),
+                              });
+                              await fetchDetail();
+                              await onMutated();
+                            }}
+                          />
+                          <span
+                            className={
+                              t.status === "Completed"
+                                ? "line-through text-text-muted"
+                                : "font-medium text-text-primary"
+                            }
+                          >
+                            {t.title}
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs text-text-secondary">
+                          Due {t.dueDate} {t.dueTime || ""}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: SCORE, CONTACTS, OPPORTUNITIES, FILES & PROVENANCE */}
+          {activeTab === "more" && (
+            <div className="space-y-8">
+              {/* Opportunity Score Assessment */}
+              <div className="bg-app-secondary border border-app-border rounded-2xl p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-accent" />
+                    <h3 className="text-base font-heading font-bold text-text-primary">
+                      Opportunity Score Assessment ({primaryCol?.name || "Default"})
+                    </h3>
+                  </div>
+                  <span className="text-xs font-mono text-text-secondary">
+                    Origin: <strong>{org.scoreMethod}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {scoringConfig.dimensions.map((dim) => (
+                    <div
+                      key={dim.key}
+                      className="p-3.5 rounded-xl bg-app-surface border border-app-border text-xs"
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-medium text-text-primary">{dim.label}</span>
+                        <span className="font-mono text-text-muted">{dim.weight}% wt</span>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        placeholder="0 - 100"
+                        value={scoreBreakdown[dim.key] ?? ""}
+                        onChange={(e) =>
+                          setScoreBreakdown((prev) => ({
+                            ...prev,
+                            [dim.key]: Number(e.target.value),
+                          }))
+                        }
+                        className="w-full bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-app-border">
+                  <button
+                    type="button"
+                    onClick={() => handleSaveScore(false)}
+                    className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-semibold"
+                  >
+                    Calculate Weighted Score
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="manual-score" className="text-xs text-text-secondary">
+                      Manual Score Override (0–100):
+                    </label>
+                    <input
+                      id="manual-score"
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={manualScoreInput}
+                      onChange={(e) => setManualScoreInput(e.target.value)}
+                      className="w-20 bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-xs font-mono text-text-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveScore(true)}
+                      className="px-3.5 py-1.5 rounded-xl bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
+                    >
+                      Override
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Contacts & Opportunities Side by Side */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
+                {/* Contacts */}
+                <div className="space-y-4">
+                  <h3 className="text-base font-heading font-bold text-text-primary">
+                    Individual Contacts ({detail.contacts.length})
+                  </h3>
+                  <form
+                    onSubmit={handleCreateContact}
+                    className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Full Name *"
+                        value={newContactName}
+                        onChange={(e) => setNewContactName(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Job Title (e.g. Founder)"
+                        value={newContactRole}
+                        onChange={(e) => setNewContactRole(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Business Email"
+                        value={newContactEmail}
+                        onChange={(e) => setNewContactEmail(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Phone"
+                        value={newContactPhone}
+                        onChange={(e) => setNewContactPhone(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <label className="inline-flex items-center gap-2 text-xs text-text-secondary">
+                        <input
+                          type="checkbox"
+                          checked={newContactDnc}
+                          onChange={(e) => setNewContactDnc(e.target.checked)}
+                        />
+                        Mark as Do Not Contact
+                      </label>
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold"
+                      >
+                        + Save Contact
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="space-y-2.5">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {detail.contacts.map((c: any) => (
+                      <div
+                        key={c.id}
+                        className="p-4 rounded-2xl bg-app-secondary border border-app-border flex items-center justify-between text-xs"
+                      >
+                        <div>
+                          <div className="font-heading font-semibold text-sm text-text-primary">
+                            {c.fullName}
+                          </div>
+                          <div className="text-text-secondary mt-0.5">
+                            {c.jobTitle || "Role unknown"} • {c.email || "No email"} •{" "}
+                            {c.phone || "No phone"}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Opportunities */}
+                <div className="space-y-4">
+                  <h3 className="text-base font-heading font-bold text-text-primary">
+                    Sales Opportunities ({detail.opportunities.length})
+                  </h3>
+                  <form
+                    onSubmit={handleCreateOpportunity}
+                    className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      <input
+                        type="text"
+                        required
+                        placeholder="Opportunity Name *"
+                        value={newOppName}
+                        onChange={(e) => setNewOppName(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Service Type"
+                        value={newOppService}
+                        onChange={(e) => setNewOppService(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <input
+                        type="number"
+                        placeholder="Estimated Value"
+                        value={newOppValue}
+                        onChange={(e) => setNewOppValue(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      />
+                      <select
+                        value={newOppCurrency}
+                        onChange={(e) => setNewOppCurrency(e.target.value)}
+                        className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                      >
+                        <option value="INR">INR (₹)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="GBP">GBP (£)</option>
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold"
+                      >
+                        + Add Opportunity
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="space-y-2.5">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {detail.opportunities.map((opp: any) => (
                       <div
                         key={opp.id}
-                        className="p-4 rounded-xl bg-app-secondary border border-app-border flex flex-wrap items-center justify-between gap-4 text-xs"
+                        className="p-4 rounded-2xl bg-app-secondary border border-app-border flex items-center justify-between text-xs"
                       >
                         <div>
                           <div className="font-heading font-semibold text-sm text-text-primary">
                             {opp.name}
                           </div>
                           <div className="text-text-secondary mt-0.5">
-                            {opp.serviceType} • Value:{" "}
-                            <strong className="font-mono text-text-primary">
-                              {opp.estimatedValue !== null && opp.estimatedValue !== undefined
-                                ? `${opp.currency} ${Number(opp.estimatedValue).toLocaleString()}`
-                                : "Unknown (Not Estimated)"}
-                            </strong>
+                            {opp.serviceType} •{" "}
+                            {opp.estimatedValue !== null && opp.estimatedValue !== undefined
+                              ? `${opp.currency} ${Number(opp.estimatedValue).toLocaleString()}`
+                              : "Unestimated"}
                           </div>
-                          {opp.nextAction && (
-                            <div className="text-text-muted mt-1">
-                              Next Action: {opp.nextAction}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-1 rounded bg-app-surface border border-app-border font-mono">
-                            {stg?.name || opp.stageId}
-                          </span>
                         </div>
                       </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 4: NOTES */}
-          {activeTab === "notes" && (
-            <div className="space-y-4">
-              <form
-                onSubmit={handleAddNote}
-                className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3"
-              >
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="Write detailed research note, website audit findings, or conversation summary..."
-                  value={newNoteText}
-                  onChange={(e) => setNewNoteText(e.target.value)}
-                  className="w-full bg-app-surface border border-app-border rounded-lg p-3 text-xs text-text-primary"
-                />
-                <div className="flex items-center justify-between">
-                  <label className="inline-flex items-center gap-2 text-xs text-text-secondary">
-                    <input
-                      type="checkbox"
-                      checked={newNotePinned}
-                      onChange={(e) => setNewNotePinned(e.target.checked)}
-                    />
-                    Pin important note to top
-                  </label>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
-                  >
-                    Save Note
-                  </button>
-                </div>
-              </form>
-
-              <div className="space-y-3">
-                {detail.notes.length === 0 ? (
-                  <p className="text-xs text-text-secondary text-center py-6">
-                    No user notes added yet.
-                  </p>
-                ) : (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  detail.notes.map((n: any) => (
-                    <div
-                      key={n.id}
-                      className={`p-4 rounded-xl border text-xs space-y-2 ${
-                        n.isPinned
-                          ? "bg-accent/10 border-accent/40"
-                          : "bg-app-secondary border-app-border"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between text-[11px] font-mono text-text-muted">
-                        <span className="flex items-center gap-1.5">
-                          {n.isPinned && <Pin className="w-3 h-3 text-accent" />}
-                          {n.origin.toUpperCase()} NOTE •{" "}
-                          {new Date(n.createdAt).toLocaleString()}
-                        </span>
-                      </div>
-                      <p className="text-text-primary whitespace-pre-wrap leading-relaxed">
-                        {n.content}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: ACTIVITY */}
-          {activeTab === "activity" && (
-            <div className="space-y-5">
-              <form
-                onSubmit={handleLogManualActivity}
-                className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3"
-              >
-                <h3 className="text-xs font-mono uppercase text-text-primary">
-                  Log Manual Communication / Activity
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <select
-                    value={manualActType}
-                    onChange={(e) => setManualActType(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  >
-                    <option value="email_sent">Email Sent</option>
-                    <option value="call_made">Call Made</option>
-                    <option value="meeting_held">Meeting Held</option>
-                    <option value="message_received">Message Received</option>
-                    <option value="followup_completed">Follow-up Completed</option>
-                    <option value="proposal_sent">Proposal Sent</option>
-                  </select>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Summary of interaction..."
-                    value={manualActTitle}
-                    onChange={(e) => setManualActTitle(e.target.value)}
-                    className="sm:col-span-2 bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
-                  >
-                    Log Activity
-                  </button>
-                </div>
-              </form>
-
-              <div className="space-y-2.5">
-                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                {detail.activities.map((a: any) => (
-                  <div
-                    key={a.id}
-                    className="p-3.5 rounded-xl bg-app-secondary border border-app-border flex items-center justify-between gap-3 text-xs"
-                  >
-                    <div>
-                      <div className="font-medium text-text-primary">{a.title}</div>
-                      {a.description && (
-                        <div className="text-text-secondary mt-0.5">{a.description}</div>
-                      )}
-                    </div>
-                    <div className="text-right font-mono text-[11px] text-text-muted shrink-0">
-                      <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border mr-2">
-                        {a.actorOrigin}
-                      </span>
-                      {new Date(a.createdAt).toLocaleString()}
-                    </div>
+                    ))}
                   </div>
-                ))}
+                </div>
               </div>
-            </div>
-          )}
 
-          {/* TAB 6: TASKS & FOLLOW-UPS */}
-          {activeTab === "tasks" && (
-            <div className="space-y-5">
-              <form
-                onSubmit={handleCreateTask}
-                className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3"
-              >
-                <h3 className="text-xs font-mono uppercase text-text-primary">
-                  Schedule Follow-up or Task
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Task / Follow-up Title *"
-                    value={newTaskTitle}
-                    onChange={(e) => setNewTaskTitle(e.target.value)}
-                    className="sm:col-span-2 bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <select
-                    value={newTaskType}
-                    onChange={(e) => setNewTaskType(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  >
-                    <option value="Follow-up">Follow-up</option>
-                    <option value="Research">Research / Audit</option>
-                    <option value="Email">Email</option>
-                    <option value="Call">Call</option>
-                    <option value="Proposal">Proposal</option>
-                  </select>
-                  <select
-                    value={newTaskPriority}
-                    onChange={(e) => setNewTaskPriority(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  >
-                    <option value="high">High Priority</option>
-                    <option value="medium">Medium Priority</option>
-                    <option value="low">Low Priority</option>
-                  </select>
-                  <input
-                    type="date"
-                    value={newTaskDate}
-                    onChange={(e) => setNewTaskDate(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                  <input
-                    type="time"
-                    value={newTaskTime}
-                    onChange={(e) => setNewTaskTime(e.target.value)}
-                    className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary"
-                  />
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
-                  >
-                    Schedule Task
-                  </button>
-                </div>
-              </form>
-
-              <div className="space-y-2.5">
-                {detail.tasks.length === 0 ? (
-                  <p className="text-xs text-text-secondary text-center py-6">
-                    No tasks scheduled for this record.
-                  </p>
-                ) : (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  detail.tasks.map((t: any) => (
-                    <div
-                      key={t.id}
-                      className="p-3.5 rounded-xl bg-app-secondary border border-app-border flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="checkbox"
-                          checked={t.status === "Completed"}
-                          onChange={async () => {
-                            await fetch("/api/workspace", {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                action: "toggle_task_status",
-                                payload: { id: t.id },
-                              }),
-                            });
-                            await fetchDetail();
-                            await onMutated();
-                          }}
-                        />
-                        <span
-                          className={
-                            t.status === "Completed"
-                              ? "line-through text-text-muted"
-                              : "font-medium text-text-primary"
-                          }
-                        >
-                          {t.title}
+              {/* Files & Manual Activity Log */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-7">
+                <div className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-heading font-semibold text-text-primary">
+                      Attachments &amp; Audit Files ({detail.attachments.length})
+                    </h4>
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold cursor-pointer">
+                      <Paperclip className="w-3.5 h-3.5" />
+                      Attach File
+                      <input type="file" className="sr-only" onChange={handleFileUpload} />
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {detail.attachments.map((att: any) => (
+                      <div
+                        key={att.id}
+                        className="p-3 rounded-xl bg-app-surface border border-app-border flex items-center justify-between text-xs"
+                      >
+                        <span className="flex items-center gap-2 text-text-primary">
+                          <FileText className="w-4 h-4 text-accent" />
+                          {att.filename}
                         </span>
+                        <a
+                          href={att.dataUrl}
+                          download={att.filename}
+                          className="text-accent hover:underline"
+                        >
+                          Download
+                        </a>
                       </div>
-                      <span className="font-mono text-text-secondary">
-                        Due {t.dueDate} {t.dueTime || ""}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 7: FILES */}
-          {activeTab === "files" && (
-            <div className="space-y-4">
-              <div className="bg-app-secondary border border-app-border rounded-xl p-5 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-heading font-semibold text-text-primary">
-                    Attachments &amp; Audit Documents
-                  </h3>
-                  <p className="text-xs text-text-secondary">
-                    Upload website screenshots, audit PDFs, or proposals (Max 10MB).
-                  </p>
+                    ))}
+                  </div>
                 </div>
-                <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold cursor-pointer">
-                  <Paperclip className="w-3.5 h-3.5" />
-                  Attach File
-                  <input type="file" className="sr-only" onChange={handleFileUpload} />
-                </label>
+
+                <form
+                  onSubmit={handleLogManualActivity}
+                  className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3"
+                >
+                  <h4 className="text-sm font-heading font-semibold text-text-primary">
+                    Log Manual Communication
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <select
+                      value={manualActType}
+                      onChange={(e) => setManualActType(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    >
+                      <option value="email_sent">Email Sent</option>
+                      <option value="call_made">Call Made</option>
+                      <option value="meeting_held">Meeting Held</option>
+                      <option value="message_received">Message Received</option>
+                    </select>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Summary of interaction..."
+                      value={manualActTitle}
+                      onChange={(e) => setManualActTitle(e.target.value)}
+                      className="sm:col-span-2 bg-app-surface border border-app-border rounded-xl px-3 py-2 text-text-primary"
+                    />
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 rounded-xl bg-accent text-white text-xs font-semibold"
+                    >
+                      Log Activity
+                    </button>
+                  </div>
+                </form>
               </div>
 
-              <div className="space-y-2.5">
-                {detail.attachments.length === 0 ? (
-                  <p className="text-xs text-text-secondary text-center py-6">
-                    No files attached to this organization yet.
-                  </p>
-                ) : (
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  detail.attachments.map((att: any) => (
+              {/* Source Provenance */}
+              {detail.sourceRecords.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="text-base font-heading font-bold text-text-primary">
+                    Spreadsheet Import Provenance
+                  </h3>
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {detail.sourceRecords.map((sr: any) => (
                     <div
-                      key={att.id}
-                      className="p-3.5 rounded-xl bg-app-secondary border border-app-border flex items-center justify-between text-xs"
+                      key={sr.id}
+                      className="bg-app-secondary border border-app-border rounded-2xl p-5 space-y-3 text-xs"
                     >
-                      <div className="flex items-center gap-2.5">
-                        <FileText className="w-4 h-4 text-accent" />
-                        <div>
-                          <div className="font-medium text-text-primary">{att.filename}</div>
-                          <div className="text-[11px] font-mono text-text-muted">
-                            {(att.sizeBytes / 1024).toFixed(1)} KB • {att.category}
-                          </div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-app-border">
+                        <div className="flex items-center gap-2">
+                          <Database className="w-4 h-4 text-accent" />
+                          <strong className="text-text-primary">{sr.sourceFilename}</strong>
+                        </div>
+                        <div className="font-mono text-text-secondary">
+                          Sheet: <strong>{sr.sheetName}</strong> • Row:{" "}
+                          <strong>#{sr.rowNumber}</strong>
                         </div>
                       </div>
-                      <a
-                        href={att.dataUrl}
-                        download={att.filename}
-                        className="text-accent hover:underline font-medium"
-                      >
-                        Download
-                      </a>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 8: SOURCE DATA PROVENANCE (Section 11.9) */}
-          {activeTab === "source" && (
-            <div className="space-y-4">
-              {detail.sourceRecords.length === 0 ? (
-                <div className="p-6 text-center bg-app-secondary border border-app-border rounded-xl text-xs text-text-secondary">
-                  This record was created manually in the CRM and has no external spreadsheet provenance.
-                </div>
-              ) : (
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                detail.sourceRecords.map((sr: any) => (
-                  <div
-                    key={sr.id}
-                    className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-3 text-xs"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-app-border">
-                      <div className="flex items-center gap-2">
-                        <Database className="w-4 h-4 text-accent" />
-                        <strong className="text-text-primary">{sr.sourceFilename}</strong>
-                      </div>
-                      <div className="font-mono text-[11px] text-text-secondary">
-                        Sheet: <strong>{sr.sheetName}</strong> • Row:{" "}
-                        <strong>#{sr.rowNumber}</strong> • Lead ID:{" "}
-                        <strong>{sr.externalLeadId || "—"}</strong> • Batch:{" "}
-                        <strong>{sr.importBatchId}</strong>
-                      </div>
-                    </div>
-
-                    {sr.validationWarnings && sr.validationWarnings.length > 0 && (
-                      <div className="p-2.5 rounded bg-status-warning/15 border border-status-warning/30 text-status-warning">
-                        <div className="font-semibold mb-1">Import Validation Warnings:</div>
-                        {sr.validationWarnings.map((w: string, idx: number) => (
-                          <div key={idx}>• {w}</div>
-                        ))}
-                      </div>
-                    )}
-
-                    <div>
-                      <div className="text-[11px] font-mono uppercase text-text-muted mb-2">
-                        Preserved Original Spreadsheet Row Values
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         {Object.entries(sr.rawValues || {}).map(([col, val]) => (
                           <div
                             key={col}
-                            className="p-2 rounded bg-app-surface border border-app-border flex justify-between gap-2"
+                            className="p-2.5 rounded-xl bg-app-surface border border-app-border flex justify-between gap-2"
                           >
                             <span className="text-text-muted">{col}:</span>
                             <span className="font-mono text-text-primary text-right break-all">
@@ -2084,8 +2157,8 @@ export function LeadProfileModal({
                         ))}
                       </div>
                     </div>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
           )}
