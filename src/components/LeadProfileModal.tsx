@@ -21,12 +21,20 @@ import {
   Sliders,
   ShieldAlert,
   Database,
-  Layers,
+  Bookmark,
+  Send,
+  MessageSquare,
+  Heart,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
 } from "lucide-react";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
 
 interface LeadProfileModalProps {
   organizationId: string;
+  allOrganizationIds?: string[];
+  onSelectOrganization?: (id: string) => void;
   collections: Array<{ id: string; name: string; color: string; scoringConfig?: ScoringConfigJSON }>;
   stages: Array<{ id: string; name: string; color: string }>;
   fieldDefinitions: Array<{
@@ -44,6 +52,8 @@ interface LeadProfileModalProps {
 
 export function LeadProfileModal({
   organizationId,
+  allOrganizationIds = [],
+  onSelectOrganization,
   collections,
   stages,
   fieldDefinitions,
@@ -65,6 +75,10 @@ export function LeadProfileModal({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [detail, setDetail] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Quick Message Box state
+  const [quickMessageText, setQuickMessageText] = useState("");
+  const [quickMessageChannel, setQuickMessageChannel] = useState("Email");
 
   // Edit form state
   const [editName, setEditName] = useState("");
@@ -114,6 +128,13 @@ export function LeadProfileModal({
   const [manualActType, setManualActType] = useState("email_sent");
   const [manualActTitle, setManualActTitle] = useState("");
 
+  const currentIdx = allOrganizationIds.indexOf(organizationId);
+  const prevOrgId = currentIdx > 0 ? allOrganizationIds[currentIdx - 1] : null;
+  const nextOrgId =
+    currentIdx !== -1 && currentIdx < allOrganizationIds.length - 1
+      ? allOrganizationIds[currentIdx + 1]
+      : null;
+
   const fetchDetail = useCallback(async () => {
     setLoading(true);
     try {
@@ -140,6 +161,11 @@ export function LeadProfileModal({
       setEditCustomValues(o.customValues || {});
       setScoreBreakdown(o.scoreBreakdown || {});
       setManualScoreInput(o.score !== null && o.score !== undefined ? String(o.score) : "");
+      setQuickMessageText(
+        `Hi ${o.name} team — we reviewed ${o.normalizedDomain || "your storefront"} (${
+          o.observedFacts || "e-commerce store"
+        }) and put together a quick breakdown of conversion & AI automation upgrades for your team.`
+      );
     } catch (err) {
       notify(err instanceof Error ? err.message : "Error loading lead", "error");
     } finally {
@@ -161,8 +187,14 @@ export function LeadProfileModal({
 
   if (loading || !detail) {
     return (
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex justify-end">
-        <div className="w-full max-w-4xl bg-app-surface border-l border-app-border h-full p-6 overflow-y-auto animate-pulse space-y-4">
+      <div
+        className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
+        onClick={onClose}
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="w-full max-w-4xl bg-app-surface border border-app-border rounded-2xl p-6 overflow-y-auto animate-pulse space-y-4 shadow-2xl"
+        >
           <div className="h-8 w-64 bg-app-secondary rounded" />
           <div className="h-4 w-96 bg-app-secondary rounded" />
           <div className="h-64 bg-app-secondary rounded-xl mt-6" />
@@ -471,23 +503,130 @@ export function LeadProfileModal({
     reader.readAsDataURL(file);
   }
 
+  async function handleToggleBookmarkInspiration() {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "toggle_bookmark_inspiration",
+        payload: { organizationId: org.id },
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      await fetchDetail();
+      await onMutated();
+      notify(
+        data.isBookmarked
+          ? `Bookmarked ${org.name} website to Design Inspirations`
+          : `Removed ${org.name} from Design Inspirations`,
+        data.isBookmarked ? "success" : "info"
+      );
+    }
+  }
+
+  async function handleMessageOperation(
+    messageStatus: "not_messaged" | "message_sent" | "followup_sent" | "replied",
+    channel = quickMessageChannel,
+    note?: string
+  ) {
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record_message_operation",
+        payload: {
+          organizationId: org.id,
+          messageStatus,
+          channel,
+          note,
+        },
+      }),
+    });
+    if (res.ok) {
+      await fetchDetail();
+      await onMutated();
+      const labels: Record<string, string> = {
+        not_messaged: "Marked as Not Messaged",
+        message_sent: `Marked Message Sent (${channel})`,
+        followup_sent: `Marked Follow-up Sent (${channel})`,
+        replied: `Marked Replied (${channel})`,
+      };
+      notify(labels[messageStatus] || "Message status updated", "success");
+    }
+  }
+
+  async function handleTinderDecision(decision: "pass" | "qualify") {
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "inline_update_lead",
+        payload: {
+          id: org.id,
+          updates:
+            decision === "qualify"
+              ? {
+                  qualificationDecision: "qualified",
+                  outreachApproval: "approved",
+                  primaryStageId:
+                    org.primaryStageId === "stg_new" ? "stg_qualified" : org.primaryStageId,
+                }
+              : {
+                  qualificationDecision: "disqualified",
+                  primaryStageId: "stg_lost",
+                },
+        },
+      }),
+    });
+    await fetchDetail();
+    await onMutated();
+    notify(
+      decision === "qualify"
+        ? `Qualified & approved ${org.name} for outreach`
+        : `Passed on ${org.name}`,
+      decision === "qualify" ? "success" : "info"
+    );
+    if (nextOrgId && onSelectOrganization) {
+      onSelectOrganization(nextOrgId);
+    }
+  }
+
+  const extractedEmail =
+    detail.contacts?.[0]?.email ||
+    (org.publishedContact && org.publishedContact.includes("@")
+      ? org.publishedContact.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0]
+      : null);
+
+  const extractedPhone =
+    detail.contacts?.[0]?.phone ||
+    (org.publishedContact
+      ? org.publishedContact.replace(/[^0-9+]/g, "").length >= 8
+        ? org.publishedContact.replace(/[^0-9]/g, "")
+        : null
+      : null);
+
   const applicableCustomFields = fieldDefinitions.filter(
     (f) => !f.collectionId || memberCollectionIds.includes(f.collectionId)
   );
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/65 backdrop-blur-sm flex justify-end"
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="lead-profile-heading"
+      onClick={onClose}
     >
-      <div className="w-full max-w-4xl bg-app-surface border-l border-app-border h-full flex flex-col overflow-hidden shadow-2xl">
-        {/* Top Profile Header (Matches Mockup 4) */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-4xl max-h-[92vh] bg-app-surface border border-app-border rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+      >
+        {/* Top Centered Card Header + Tinder-Style Controls */}
         <div className="p-5 border-b border-app-border bg-app-sidebar">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex items-start gap-3.5">
-              <div className="w-11 h-11 rounded-xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-base flex items-center justify-center shrink-0">
+              <div className="w-12 h-12 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-base flex items-center justify-center shrink-0 shadow-sm">
                 {org.name.slice(0, 2).toUpperCase()}
               </div>
               <div>
@@ -516,6 +655,12 @@ export function LeadProfileModal({
                   >
                     {org.score !== null ? `${org.score} / 100` : "Unscored"}
                   </span>
+                  {org.isBookmarked && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent/20 text-accent text-[11px] font-medium">
+                      <Bookmark className="w-3 h-3 fill-current" />
+                      Saved in Design Inspirations
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3 text-xs text-text-secondary mt-1">
@@ -557,7 +702,68 @@ export function LeadProfileModal({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Tinder-Style Quick Decision, Bookmark, Prev/Next & Stage Controls */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {allOrganizationIds.length > 1 && onSelectOrganization && (
+                <div className="inline-flex items-center bg-app-surface border border-app-border rounded-lg p-0.5 mr-1">
+                  <button
+                    type="button"
+                    disabled={!prevOrgId}
+                    onClick={() => prevOrgId && onSelectOrganization(prevOrgId)}
+                    title="Previous Lead Card"
+                    className="p-1.5 rounded hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="px-2 font-mono text-[11px] text-text-muted">
+                    {currentIdx + 1}/{allOrganizationIds.length}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!nextOrgId}
+                    onClick={() => nextOrgId && onSelectOrganization(nextOrgId)}
+                    title="Next Lead Card"
+                    className="p-1.5 rounded hover:bg-app-elevated text-text-secondary hover:text-text-primary disabled:opacity-35"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleTinderDecision("pass")}
+                title="Pass / Disqualify (Tinder Left)"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-xs font-semibold transition"
+              >
+                <X className="w-3.5 h-3.5" />
+                Pass
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleBookmarkInspiration}
+                title="Bookmark Website to Design Inspirations"
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                  org.isBookmarked
+                    ? "bg-accent text-white border-accent"
+                    : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
+                }`}
+              >
+                <Bookmark className={`w-3.5 h-3.5 ${org.isBookmarked ? "fill-current" : ""}`} />
+                {org.isBookmarked ? "Bookmarked" : "Bookmark Site"}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleTinderDecision("qualify")}
+                title="Qualify & Approve Outreach (Tinder Right)"
+                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-xs font-semibold transition"
+              >
+                <Heart className="w-3.5 h-3.5 fill-current" />
+                Qualify
+              </button>
+
               <select
                 aria-label="Pipeline Stage"
                 value={activeStage?.id || "stg_new"}
@@ -577,29 +783,10 @@ export function LeadProfileModal({
                   setActiveTab("overview");
                   setIsEditing(!isEditing);
                 }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary"
               >
                 <Edit3 className="w-3.5 h-3.5" />
-                {isEditing ? "Cancel Edit" : "Edit"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab("tasks")}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold"
-              >
-                <Calendar className="w-3.5 h-3.5" />
-                + Follow-up
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCreateContentIdeaFromLead}
-                title="Create Content Idea from Lead"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-xs text-text-secondary hover:text-text-primary"
-              >
-                <Video className="w-3.5 h-3.5 text-accent" />
-                Reel Idea
+                {isEditing ? "Cancel" : "Edit"}
               </button>
 
               <button
@@ -613,8 +800,126 @@ export function LeadProfileModal({
             </div>
           </div>
 
+          {/* Simple Message & Outreach Operations Bar */}
+          <div className="mt-3 pt-3 border-t border-app-border/80 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-mono text-[11px] uppercase text-text-muted mr-1 flex items-center gap-1">
+                <MessageSquare className="w-3.5 h-3.5 text-accent" />
+                Message Status:
+              </span>
+              {[
+                { id: "not_messaged", label: "Not Messaged" },
+                { id: "message_sent", label: "✓ Message Sent" },
+                { id: "followup_sent", label: "✓ Follow-up Sent" },
+                { id: "replied", label: "★ Replied" },
+              ].map((st) => {
+                const currentSt = org.messageStatus || "not_messaged";
+                const isActive = currentSt === st.id;
+                return (
+                  <button
+                    key={st.id}
+                    type="button"
+                    onClick={() =>
+                      handleMessageOperation(
+                        st.id as "not_messaged" | "message_sent" | "followup_sent" | "replied"
+                      )
+                    }
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium border transition ${
+                      isActive
+                        ? st.id === "replied"
+                          ? "bg-status-success text-black border-status-success font-semibold"
+                          : st.id === "not_messaged"
+                          ? "bg-app-secondary border-text-muted text-text-primary"
+                          : "bg-accent text-white border-accent font-semibold"
+                        : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {st.label}
+                  </button>
+                );
+              })}
+              {org.lastMessagedAt && (
+                <span className="text-[11px] font-mono text-text-muted ml-1">
+                  Last: {new Date(org.lastMessagedAt).toLocaleDateString()} (
+                  {org.lastMessageChannel || "Outreach"})
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {extractedEmail ? (
+                <a
+                  href={`mailto:${extractedEmail}?subject=${encodeURIComponent(
+                    `Quick question for ${org.name}`
+                  )}&body=${encodeURIComponent(quickMessageText)}`}
+                  onClick={() => handleMessageOperation("message_sent", "Email")}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent hover:bg-accent-hover text-white font-semibold"
+                >
+                  <Mail className="w-3.5 h-3.5" />
+                  Send Email
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(quickMessageText);
+                    handleMessageOperation("message_sent", "Direct Message");
+                    notify("Outreach message copied & marked as Message Sent", "success");
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-accent hover:bg-accent-hover text-white font-semibold"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  Copy &amp; Mark Sent
+                </button>
+              )}
+
+              {extractedPhone && (
+                <a
+                  href={`https://wa.me/${extractedPhone}?text=${encodeURIComponent(
+                    quickMessageText
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => handleMessageOperation("message_sent", "WhatsApp")}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-status-success/20 hover:bg-status-success/30 border border-status-success/40 text-status-success font-semibold"
+                >
+                  <Phone className="w-3.5 h-3.5" />
+                  WhatsApp
+                </a>
+              )}
+
+              {(org.contactEvidenceValid && org.contactEvidenceUrl) || org.websiteUrl ? (
+                <a
+                  href={
+                    org.contactEvidenceValid && org.contactEvidenceUrl
+                      ? org.contactEvidenceUrl
+                      : org.websiteUrl.startsWith("http")
+                      ? org.websiteUrl
+                      : `https://${org.websiteUrl}`
+                  }
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-accent" />
+                  Contact Page
+                </a>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={handleCreateContentIdeaFromLead}
+                title="Create Content Idea from Lead"
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
+              >
+                <Video className="w-3.5 h-3.5 text-accent" />
+                Reel Idea
+              </button>
+            </div>
+          </div>
+
           {/* Governance & Verification Banner */}
-          <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-app-border/70 text-[11px] font-mono">
+          <div className="flex flex-wrap items-center gap-2 mt-3 pt-2.5 border-t border-app-border/60 text-[11px] font-mono">
             <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border text-text-secondary">
               Source Status: <strong className="text-text-primary">{org.sourceLeadStatus || "candidate"}</strong>
             </span>
@@ -644,9 +949,9 @@ export function LeadProfileModal({
           </div>
 
           {/* Tabs Navigation */}
-          <div className="flex items-center gap-1 mt-4 -mb-5 overflow-x-auto">
+          <div className="flex items-center gap-1 mt-3 -mb-5 overflow-x-auto">
             {[
-              { id: "overview", label: "Overview" },
+              { id: "overview", label: "Overview & Message" },
               { id: "contacts", label: `Contacts (${detail.contacts.length})` },
               { id: "opportunities", label: `Opportunities (${detail.opportunities.length})` },
               { id: "notes", label: `Notes (${detail.notes.length})` },
@@ -672,7 +977,66 @@ export function LeadProfileModal({
         </div>
 
         {/* Tab Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {/* Quick Message Composer Box on Overview Tab */}
+          {activeTab === "overview" && (
+            <div className="bg-app-secondary border border-app-border rounded-xl p-4 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Send className="w-3.5 h-3.5 text-accent" />
+                  <span className="text-xs font-heading font-semibold text-text-primary">
+                    Quick Outreach Message &amp; Operations
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <select
+                    value={quickMessageChannel}
+                    onChange={(e) => setQuickMessageChannel(e.target.value)}
+                    aria-label="Message channel"
+                    className="bg-app-surface border border-app-border rounded px-2 py-1 text-xs text-text-primary"
+                  >
+                    <option value="Email">Channel: Email</option>
+                    <option value="WhatsApp">Channel: WhatsApp</option>
+                    <option value="Instagram DM">Channel: Instagram DM</option>
+                    <option value="LinkedIn">Channel: LinkedIn</option>
+                    <option value="Contact Form">Channel: Website Contact Form</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(quickMessageText);
+                      notify("Outreach message copied to clipboard", "info");
+                    }}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
+                  >
+                    <Copy className="w-3 h-3" />
+                    Copy Text
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleMessageOperation(
+                        "message_sent",
+                        quickMessageChannel,
+                        quickMessageText
+                      )
+                    }
+                    className="inline-flex items-center gap-1 px-3 py-1 rounded bg-accent hover:bg-accent-hover text-white font-semibold"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Log Message Sent
+                  </button>
+                </div>
+              </div>
+              <textarea
+                rows={2}
+                value={quickMessageText}
+                onChange={(e) => setQuickMessageText(e.target.value)}
+                placeholder="Write or customize your outreach message for this lead..."
+                className="w-full bg-app-surface border border-app-border rounded-lg p-2.5 text-xs text-text-primary"
+              />
+            </div>
+          )}
           {/* Warning Banners if Directory-Only or Invalid Contact Evidence URL */}
           {org.verificationLevel.toLowerCase().includes("directory") && (
             <div className="p-3.5 rounded-xl bg-status-warning/10 border border-status-warning/40 flex items-start gap-3 text-xs text-status-warning">
