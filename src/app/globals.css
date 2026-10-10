@@ -32,15 +32,113 @@
   box-sizing: border-box;
 }
 
+/* ============================================================================
+   JAYANT CRM — TYPOGRAPHY DESIGN SYSTEM
+   - Primary UI / Tables / Forms / Buttons / Navigation: Inter (--font-inter)
+   - Page Titles / Collection Headings / KPI Metrics: Manrope (--font-manrope)
+   - Technical Metadata & Identifiers Only: IBM Plex Mono (--font-ibm-plex-mono)
+   ============================================================================ */
+
 html,
 body {
   background-color: var(--bg-app);
   color: var(--text-primary);
+  font-family: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13.5px;
+  line-height: 1.45;
+  font-weight: 400;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.006em;
 }
 
-/* Accessible focus outlines per modern-web-guidance */
+/* Primary Interface Elements: strictly Inter with controlled weights */
+table,
+thead,
+tbody,
+tr,
+th,
+td,
+input,
+select,
+textarea,
+button,
+nav,
+label,
+p {
+  font-family: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-style: normal;
+}
+
+/* Spreadsheet-style dense table headers and cells */
+table th {
+  font-family: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+}
+
+table td {
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+/* Selective Headings & Prominent KPI Numerals: Manrope */
+h1,
+h2,
+h3,
+.font-heading,
+.type-page-title,
+.type-collection-heading,
+.type-kpi-metric {
+  font-family: var(--font-manrope), "Manrope", var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.018em;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+h1 {
+  font-size: clamp(1.125rem, 1.4vw, 1.35rem);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: clamp(0.95rem, 1.1vw, 1.075rem);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Technical Metadata & Identifiers Only: IBM Plex Mono */
+code,
+kbd,
+pre,
+.font-mono,
+.type-tech-id {
+  font-family: var(--font-ibm-plex-mono), "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0em;
+  font-style: normal;
+}
+
+/* Tabular Numerals for aligned numeric data, currency values, and KPI comparisons */
+.tabular-nums,
+.type-numeric,
+.type-kpi-metric,
+[data-numeric="true"] {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Accessible focus outlines */
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
