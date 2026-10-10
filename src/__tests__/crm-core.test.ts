@@ -342,8 +342,8 @@ describe("End-to-End Workflows A–F (Section 13.8 & Section 33)", () => {
         serviceType: "Website Redesign",
         estimatedValue: "450000",
         currency: "INR",
-        confidence: 75,
-        status: "open",
+        probability: 75,
+        outcome: "open",
       },
       {
         id: "opp_ai_assistant_2",
@@ -356,8 +356,8 @@ describe("End-to-End Workflows A–F (Section 13.8 & Section 33)", () => {
         serviceType: "AI Chatbot",
         estimatedValue: "220000",
         currency: "INR",
-        confidence: 60,
-        status: "open",
+        probability: 60,
+        outcome: "open",
       },
     ]);
 
@@ -382,7 +382,7 @@ describe("End-to-End Workflows A–F (Section 13.8 & Section 33)", () => {
       organizationId: targetOrg.id,
       title: `Why ${targetOrg.name} loses mobile conversions at checkout`,
       platform: "Instagram Reel",
-      contentFormat: "Website Teardown",
+      contentType: "Website Teardown",
       hook: "This D2C brand has great products, but their mobile product page hides the CTA below the fold.",
       status: "scripted",
     });
@@ -411,8 +411,7 @@ describe("End-to-End Workflows A–F (Section 13.8 & Section 33)", () => {
       workspaceId: DEFAULT_WORKSPACE_ID,
       businessOrDomain: suppressedCandidate.normalizedDomain || suppressedCandidate.name,
       normalizedDomain: suppressedCandidate.normalizedDomain,
-      reason: "Requested opt-out via email",
-      source: "manual",
+      reasonOrSource: "Requested opt-out via email",
     });
 
     // Mark organization suppressed
