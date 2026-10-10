@@ -439,37 +439,29 @@ export function ImportCenterView({
                 />
               </div>
 
-              <div className="bg-app-surface border border-app-border rounded-xl p-5 flex flex-col justify-between">
+              <div className="bg-app-surface border border-app-border rounded-xl p-5 flex flex-col justify-between space-y-4">
                 <div>
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/15 text-accent text-[11px] font-mono font-medium mb-3">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-status-success/15 text-status-success text-[11px] font-mono font-medium mb-3">
                     <Sparkles className="w-3.5 h-3.5" />
-                    Verified Master Ledger Fixture
+                    100% Local Browser Storage Import
                   </div>
                   <h3 className="text-sm font-heading font-semibold text-text-primary">
-                    Global E-Commerce Lead Ledger (2026).xlsx
+                    Multi-Sheet Workbook &amp; Governance Rules
                   </h3>
-                  <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">
-                    Load or download the verified 3-sheet workbook containing 200 candidate leads (100 India, 100 International; 192 site description, 8 directory-only; plus Run Log &amp; Do Not Contact sheets and Contact Evidence URL anomalies <code className="font-mono text-status-warning">49</code> &amp; <code className="font-mono text-status-warning">sent</code>).
-                  </p>
-                </div>
-
-                <div className="space-y-2.5 mt-6">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => handleFileSelect(null, true)}
-                    className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg bg-app-elevated hover:bg-accent hover:text-white text-text-primary border border-app-border text-xs font-semibold transition"
-                  >
-                    <FileSpreadsheet className="w-4 h-4" />
-                    {loading ? "Loading Workbook..." : "Inspect 200-Lead Ledger in Wizard"}
-                  </button>
-                  <a
-                    href="/api/export?format=ledger_fixture"
-                    className="w-full flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated text-text-secondary hover:text-text-primary text-xs font-medium transition"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download Workbook (.xlsx)
-                  </a>
+                  <ul className="text-xs text-text-secondary mt-2 space-y-1.5 leading-relaxed list-disc pl-4">
+                    <li>
+                      Parses <strong>.xlsx</strong> (multi-sheet workbooks) and <strong>.csv</strong> files directly inside your browser.
+                    </li>
+                    <li>
+                      Automatically detects <strong>Leads</strong>, <strong>Run Log</strong>, and <strong>Do Not Contact</strong> sheets.
+                    </li>
+                    <li>
+                      Preserves source statuses (<code className="font-mono">candidate</code>, <code className="font-mono">not reviewed</code>, <code className="font-mono">not approved</code>) and flags malformed URLs without inventing data.
+                    </li>
+                    <li>
+                      Never overwrites your manual notes, tasks, or custom scores on re-import.
+                    </li>
+                  </ul>
                 </div>
               </div>
             </div>
