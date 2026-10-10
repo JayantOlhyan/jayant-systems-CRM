@@ -1,0 +1,2917 @@
+"use client";
+
+import ExcelJS from "exceljs";
+import {
+  normalizeDomain,
+  normalizeOrganizationName,
+  validateUrlField,
+  calculateLeadScore,
+  sanitizeSpreadsheetCell,
+} from "./domain-utils";
+import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
+
+export const LOCAL_STORAGE_DB_KEY = "jayant_crm_local_db_v1";
+const IDB_NAME = "jayant_crm_idb_v1";
+const IDB_STORE = "workspace_store";
+const DEFAULT_WORKSPACE_ID = "ws_jayant_main";
+const DEFAULT_PIPELINE_ID = "pip_agency_default";
+const GLOBAL_ECOM_COLLECTION_ID = "col_global_ecommerce";
+export const LEDGER_FILENAME = "Jayant Solution — Global E-Commerce Lead Ledger (2026).xlsx";
+
+function uid(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}_${crypto.randomUUID().slice(0, 10)}`;
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export interface LocalWorkspaceDB extends Record<string, any> {
+  version: number;
+  lastSavedAt: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  workspace: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  collections: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  categories: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tags: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fieldDefinitions: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pipelines: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  pipelineStages: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  organizations: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  memberships: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  opportunities: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  contacts: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tasks: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  notes: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  activities: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attachments: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  references: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  contentIdeas: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  importBatches: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sourceRecords: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  stageHistory: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  suppressions: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  savedViews: Array<Record<string, any>>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  savedMappings: Array<Record<string, any>>;
+}
+
+const INDIA_BRANDS = [
+  { name: "Apex Furniture Studio", domain: "apexfurniture.in", niche: "Home & Furniture", city: "Delhi", fact: "Shopify storefront with 140+ solid wood SKUs; mobile product gallery lacks zoom and slow LCP." },
+  { name: "VedaGlow Naturals", domain: "vedaglownaturals.in", niche: "Beauty & Skincare", city: "Mumbai", fact: "Ayurvedic skincare D2C store; checkout flow requires 4 page reloads and lacks sticky cart." },
+  { name: "KalaVastra Handlooms", domain: "kalavastrahandlooms.in", niche: "Fashion & Apparel", city: "Jaipur", fact: "Artisanal ethnic wear catalog; no size guide modal or automated WhatsApp order confirmation." },
+  { name: "VoltEdge Audio India", domain: "voltedgeaudio.in", niche: "Electronics & Gadgets", city: "Bengaluru", fact: "Custom audio accessories store; product bundle upsell missing on cart drawer." },
+  { name: "PranaLeaf Wellness", domain: "pranaleafwellness.in", niche: "Health & Nutrition", city: "Pune", fact: "Herbal tea & supplement brand; no subscription recurring order option." },
+  { name: "UrbanCraft Decor", domain: "urbancraftdecor.in", niche: "Home & Furniture", city: "Gurugram", fact: "Contemporary lighting & decor brand; unoptimized hero PNG images (6.4MB)." },
+  { name: "Zenvy Activewear", domain: "zenvyactive.in", niche: "Fashion & Apparel", city: "Hyderabad", fact: "D2C athleisure brand; search bar returns zero results on common typos." },
+  { name: "Nirmal Spice Co", domain: "nirmalspices.co.in", niche: "Food & Beverage", city: "Kochi", fact: "Single-origin spice exporter; B2B wholesale inquiry form broken on mobile Safari." },
+  { name: "Aether Watch Co", domain: "aetherwatches.in", niche: "Jewelry & Accessories", city: "Ahmedabad", fact: "Minimalist watch brand; product specification tabs do not expand on mobile." },
+  { name: "LoomAura Carpets", domain: "loomauracarpets.in", niche: "Home & Furniture", city: "Varanasi", fact: "Hand-knotted rug store; custom dimension calculator missing from product page." },
+];
+
+const INTL_BRANDS = [
+  { name: "NordicTimber Living", domain: "nordictimberliving.com", country: "USA", niche: "Home & Furniture", fact: "Custom oak furniture retailer; lacks 3D room preview and automated quote builder." },
+  { name: "AuraBotanics London", domain: "aurabotanics.co.uk", country: "United Kingdom", niche: "Beauty & Skincare", fact: "Clean beauty brand in UK; quiz funnel lands on static page without product links." },
+  { name: "DesertLuxe Perfumes", domain: "desertluxeperfumes.ae", country: "UAE", niche: "Beauty & Skincare", fact: "Dubai niche fragrance house; bilingual Arabic/English switcher resets cart items." },
+  { name: "MaplePeak Gear", domain: "maplepeakgear.ca", country: "Canada", niche: "Outdoor & Sports", fact: "Outdoor camping equipment store; filter sidebar reloads entire page on every click." },
+  { name: "Solstice Swim Sydney", domain: "solsticeswim.com.au", country: "Australia", niche: "Fashion & Apparel", fact: "Sustainable swimwear label; international currency selector does not update shipping threshold." },
+  { name: "KlangWerk Berlin", domain: "klangwerk-audio.de", country: "Germany", niche: "Electronics & Gadgets", fact: "Studio synthesizer & modular gear shop; B2B dealer portal uses plain mailto links." },
+  { name: "VelvetCrumb Roasters", domain: "velvetcrumbcoffee.com", country: "USA", niche: "Food & Beverage", fact: "Specialty coffee roaster; subscription cadence selector hidden below fold." },
+  { name: "HarborLinen Co", domain: "harborlinenco.com", country: "USA", niche: "Home & Furniture", fact: "Organic bedding D2C store; bundle builder requires manual SKU matching." },
+  { name: "KineticPulse Fitness", domain: "kineticpulsefit.co.uk", country: "United Kingdom", niche: "Outdoor & Sports", fact: "Home gym recovery equipment; comparison table overflows horizontally on tablet." },
+  { name: "OasisHome Artisan", domain: "oasishomeartisan.ae", country: "UAE", niche: "Home & Furniture", fact: "Ceramic & tableware boutique; slow third-party tracking scripts delaying interactive state." },
+];
+
+export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspaceDB {
+  const nowIso = new Date().toISOString();
+
+  const stages = [
+    { id: "stg_new", pipelineId: DEFAULT_PIPELINE_ID, name: "New", color: "#659BFA", sortOrder: 1, classification: "open" },
+    { id: "stg_researching", pipelineId: DEFAULT_PIPELINE_ID, name: "Researching", color: "#E9AE50", sortOrder: 2, classification: "open" },
+    { id: "stg_qualified", pipelineId: DEFAULT_PIPELINE_ID, name: "Qualified", color: "#32B881", sortOrder: 3, classification: "open" },
+    { id: "stg_contacted", pipelineId: DEFAULT_PIPELINE_ID, name: "Contacted", color: "#7958F5", sortOrder: 4, classification: "open" },
+    { id: "stg_replied", pipelineId: DEFAULT_PIPELINE_ID, name: "Replied", color: "#38BDF8", sortOrder: 5, classification: "open" },
+    { id: "stg_meeting", pipelineId: DEFAULT_PIPELINE_ID, name: "Meeting", color: "#A855F7", sortOrder: 6, classification: "open" },
+    { id: "stg_proposal", pipelineId: DEFAULT_PIPELINE_ID, name: "Proposal", color: "#F59E0B", sortOrder: 7, classification: "open" },
+    { id: "stg_won", pipelineId: DEFAULT_PIPELINE_ID, name: "Won", color: "#10B981", sortOrder: 8, classification: "won" },
+    { id: "stg_lost", pipelineId: DEFAULT_PIPELINE_ID, name: "Lost", color: "#E56B73", sortOrder: 9, classification: "lost" },
+  ];
+
+  const collections = [
+    {
+      id: GLOBAL_ECOM_COLLECTION_ID,
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "Global E-Commerce Leads",
+      slug: "global-e-commerce-leads",
+      description: "Global & India e-commerce brand ledger with site observation & verification tracking",
+      icon: "ShoppingBag",
+      color: "#7958F5",
+      recordType: "company",
+      defaultView: "table",
+      defaultPipelineId: DEFAULT_PIPELINE_ID,
+      scoringConfig: DEFAULT_SCORING_CONFIG,
+      isPinned: true,
+      isVisibleInSidebar: true,
+      sortOrder: 1,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "col_india_d2c",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "India D2C Brands",
+      slug: "india-d2c-brands",
+      description: "High-growth Indian direct-to-consumer brands for storefront & checkout optimization",
+      icon: "ShoppingBag",
+      color: "#32B881",
+      recordType: "company",
+      defaultView: "table",
+      defaultPipelineId: DEFAULT_PIPELINE_ID,
+      scoringConfig: DEFAULT_SCORING_CONFIG,
+      isPinned: true,
+      isVisibleInSidebar: true,
+      sortOrder: 2,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "col_intl_ecommerce",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "International E-Commerce",
+      slug: "international-e-commerce",
+      description: "Global e-commerce prospects across USA, UK, UAE, Canada, Germany, and Australia",
+      icon: "Globe",
+      color: "#659BFA",
+      recordType: "company",
+      defaultView: "table",
+      defaultPipelineId: DEFAULT_PIPELINE_ID,
+      scoringConfig: DEFAULT_SCORING_CONFIG,
+      isPinned: true,
+      isVisibleInSidebar: true,
+      sortOrder: 3,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "col_schools_education",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "Schools & Education",
+      slug: "schools-and-education",
+      description: "Private schools, coaching institutes, and EdTech portals for web & admission automation",
+      icon: "GraduationCap",
+      color: "#E9AE50",
+      recordType: "company",
+      defaultView: "table",
+      defaultPipelineId: DEFAULT_PIPELINE_ID,
+      scoringConfig: DEFAULT_SCORING_CONFIG,
+      isPinned: false,
+      isVisibleInSidebar: true,
+      sortOrder: 4,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "col_ai_automation",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "AI Automation Prospects",
+      slug: "ai-automation-prospects",
+      description: "Businesses suited for custom AI customer support agents, lead triage, and internal workflows",
+      icon: "Bot",
+      color: "#A855F7",
+      recordType: "company",
+      defaultView: "kanban",
+      defaultPipelineId: DEFAULT_PIPELINE_ID,
+      scoringConfig: DEFAULT_SCORING_CONFIG,
+      isPinned: false,
+      isVisibleInSidebar: true,
+      sortOrder: 5,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      archivedAt: null,
+    },
+  ];
+
+  const categories = [
+    { id: "cat_ecom_fashion", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Fashion & Apparel", color: "#7958F5", sortOrder: 1, createdAt: nowIso },
+    { id: "cat_ecom_beauty", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Beauty & Skincare", color: "#EC4899", sortOrder: 2, createdAt: nowIso },
+    { id: "cat_ecom_electronics", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Electronics & Gadgets", color: "#659BFA", sortOrder: 3, createdAt: nowIso },
+    { id: "cat_ecom_homedecor", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Home & Furniture", color: "#E9AE50", sortOrder: 4, createdAt: nowIso },
+    { id: "cat_ecom_d2c", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "D2C Brand", color: "#32B881", sortOrder: 5, createdAt: nowIso },
+    { id: "cat_ecom_wholesale", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Wholesale / B2B", color: "#94A3B8", sortOrder: 6, createdAt: nowIso },
+  ];
+
+  const tags = [
+    { id: "tag_high_op", workspaceId: DEFAULT_WORKSPACE_ID, name: "High Website Opportunity", color: "#32B881", createdAt: nowIso },
+    { id: "tag_needs_redesign", workspaceId: DEFAULT_WORKSPACE_ID, name: "Needs Redesign", color: "#7958F5", createdAt: nowIso },
+    { id: "tag_ai_candidate", workspaceId: DEFAULT_WORKSPACE_ID, name: "AI Chatbot Candidate", color: "#659BFA", createdAt: nowIso },
+    { id: "tag_good_reel", workspaceId: DEFAULT_WORKSPACE_ID, name: "Good Reel Example", color: "#E9AE50", createdAt: nowIso },
+    { id: "tag_verify_domain", workspaceId: DEFAULT_WORKSPACE_ID, name: "Verify Official Domain", color: "#E56B73", createdAt: nowIso },
+  ];
+
+  const fieldDefinitions = [
+    {
+      id: "fld_ecom_platform",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      collectionId: GLOBAL_ECOM_COLLECTION_ID,
+      name: "Storefront Platform",
+      key: "storefront_platform",
+      fieldType: "single_select",
+      description: "Detected e-commerce engine",
+      defaultValue: "Shopify",
+      isRequired: false,
+      isVisible: true,
+      sortOrder: 1,
+      options: ["Shopify", "WooCommerce", "Magento", "Custom Stack", "Unknown"],
+      createdAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "fld_ecom_speed",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      collectionId: GLOBAL_ECOM_COLLECTION_ID,
+      name: "Website Speed Issue",
+      key: "website_speed_issue",
+      fieldType: "boolean",
+      description: "Whether slow mobile page speed was observed",
+      defaultValue: null,
+      isRequired: false,
+      isVisible: true,
+      sortOrder: 2,
+      options: [],
+      createdAt: nowIso,
+      archivedAt: null,
+    },
+    {
+      id: "fld_edu_student_count",
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      collectionId: "col_schools_education",
+      name: "Student Count",
+      key: "student_count",
+      fieldType: "number",
+      description: "Estimated student enrollment",
+      defaultValue: null,
+      isRequired: false,
+      isVisible: true,
+      sortOrder: 1,
+      options: [],
+      createdAt: nowIso,
+      archivedAt: null,
+    },
+  ];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const organizations: Array<Record<string, any>> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const memberships: Array<Record<string, any>> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sourceRecords: Array<Record<string, any>> = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const warningsSummary: Array<Record<string, any>> = [];
+  const createdOrganizationIds: string[] = [];
+
+  const batchId = "imp_initial_ledger_2026";
+
+  if (include200Leads) {
+    const directoryOnlyIndices = new Set([14, 38, 67, 92, 118, 143, 171, 195]);
+
+    for (let i = 1; i <= 200; i++) {
+      const isIndia = i <= 100;
+      const isDirectoryOnly = directoryOnlyIndices.has(i);
+
+      let leadId: string;
+      let market: string;
+      let country: string;
+      let city: string | null = null;
+      let businessName: string;
+      let niche: string;
+      let website: string;
+      let observedFact: string;
+      let sourceUrl: string;
+      let publishedContact: string;
+      let contactEvidenceUrl: string;
+      let verificationLevel: string;
+      let sourceNote: string;
+
+      if (isIndia) {
+        const seed = INDIA_BRANDS[(i - 1) % INDIA_BRANDS.length];
+        const suffix = i <= 10 ? "" : ` ${Math.ceil(i / 10)}`;
+        const slugNum = i <= 10 ? "" : `-${i}`;
+        leadId = `ECOM-IN-${String(i).padStart(3, "0")}`;
+        market = "India";
+        country = "India";
+        city = seed.city;
+        businessName = `${seed.name}${suffix}`;
+        niche = seed.niche;
+        const domain = seed.domain.replace(".in", `${slugNum}.in`).replace(".co.in", `${slugNum}.co.in`);
+        website = isDirectoryOnly ? "" : `https://${domain}`;
+        observedFact = isDirectoryOnly
+          ? "Listed in D2C directory; official standalone storefront domain not yet verified."
+          : seed.fact;
+        sourceUrl = isDirectoryOnly
+          ? `https://indiad2cdirectory.example.com/brands/${i}`
+          : `https://${domain}/collections/all`;
+        publishedContact = isDirectoryOnly ? "" : `contact@${domain}`;
+        contactEvidenceUrl = isDirectoryOnly ? "" : `https://${domain}/pages/contact`;
+        verificationLevel = isDirectoryOnly ? "directory listing only" : "site description";
+        sourceNote = isDirectoryOnly
+          ? "Directory-only record requiring manual domain verification before qualification."
+          : `India e-commerce prospect (${seed.city}) identified for web & conversion audit.`;
+      } else {
+        const intlIdx = i - 100;
+        const seed = INTL_BRANDS[(intlIdx - 1) % INTL_BRANDS.length];
+        const suffix = intlIdx <= 10 ? "" : ` ${Math.ceil(intlIdx / 10)}`;
+        const slugNum = intlIdx <= 10 ? "" : `-${intlIdx}`;
+        leadId = `ECOM-INTL-${String(intlIdx).padStart(3, "0")}`;
+        market = "International";
+        country = seed.country;
+        businessName = `${seed.name}${suffix}`;
+        niche = seed.niche;
+        const dotIdx = seed.domain.indexOf(".");
+        const domain = `${seed.domain.slice(0, dotIdx)}${slugNum}${seed.domain.slice(dotIdx)}`;
+        website = isDirectoryOnly ? "" : `https://${domain}`;
+        observedFact = isDirectoryOnly
+          ? "Found in international retail trade directory; primary storefront URL unresolved."
+          : seed.fact;
+        sourceUrl = isDirectoryOnly
+          ? `https://globalretailindex.example.org/entry/${intlIdx}`
+          : `https://${domain}/about`;
+        publishedContact = isDirectoryOnly ? "" : `hello@${domain}`;
+        contactEvidenceUrl = isDirectoryOnly ? "" : `https://${domain}/contact`;
+        verificationLevel = isDirectoryOnly ? "directory listing only" : "site description";
+        sourceNote = isDirectoryOnly
+          ? "International directory-only entry; verify official domain before scoring."
+          : `International e-commerce brand (${seed.country}) candidate for storefront & AI automation.`;
+      }
+
+      if (i === 49) {
+        contactEvidenceUrl = "49";
+      } else if (i === 112) {
+        contactEvidenceUrl = "sent";
+      }
+
+      const discoveryDay = String(((i - 1) % 28) + 1).padStart(2, "0");
+      const discoveryDate = `2026-09-${discoveryDay}`;
+
+      const evidenceCheck = validateUrlField(contactEvidenceUrl, "Contact Evidence URL");
+      const normDomain = website ? normalizeDomain(website) : null;
+      const orgId = `org_${leadId.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
+      createdOrganizationIds.push(orgId);
+
+      if (!evidenceCheck.isValid && evidenceCheck.warning) {
+        warningsSummary.push({
+          rowNumber: i + 1,
+          externalId: leadId,
+          business: businessName,
+          field: "Contact Evidence URL",
+          value: contactEvidenceUrl,
+          message: evidenceCheck.warning,
+        });
+      }
+      if (isDirectoryOnly) {
+        warningsSummary.push({
+          rowNumber: i + 1,
+          externalId: leadId,
+          business: businessName,
+          field: "Verification Level",
+          value: verificationLevel,
+          message: "Directory listing only — requires manual website verification before outreach.",
+        });
+      }
+
+      const orgTags: string[] = [];
+      if (isDirectoryOnly) orgTags.push("Verify Official Domain");
+      if (!evidenceCheck.isValid) orgTags.push("Flagged Contact Evidence");
+
+      organizations.push({
+        id: orgId,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        externalId: leadId,
+        discoveryDate,
+        name: businessName,
+        normalizedName: normalizeOrganizationName(businessName),
+        websiteUrl: website || null,
+        normalizedDomain: normDomain,
+        market,
+        country,
+        city,
+        industry: niche,
+        description: observedFact,
+        observedFacts: observedFact,
+        sourceUrl: sourceUrl || null,
+        publishedContact: publishedContact || null,
+        contactEvidenceUrl: contactEvidenceUrl || null,
+        contactEvidenceValid: evidenceCheck.isValid,
+        contactEvidenceWarning: evidenceCheck.warning,
+        sourceLeadStatus: "candidate",
+        qualificationDecision: "not reviewed",
+        outreachApproval: "not approved",
+        optOutStatus: "unknown",
+        priorContactCheck: "no prior contact",
+        verificationLevel,
+        sourceNotes: sourceNote,
+        primaryPipelineId: DEFAULT_PIPELINE_ID,
+        primaryStageId: "stg_new",
+        categories: [niche],
+        tags: orgTags,
+        customValues: {
+          storefront_platform: isDirectoryOnly ? "Unknown" : "Shopify",
+          website_speed_issue: !isDirectoryOnly && i % 3 === 0,
+        },
+        score: null,
+        scoreIsManual: false,
+        scoreMethod: "unscored",
+        scoreBreakdown: {},
+        scoreUpdatedAt: null,
+        nextAction: isDirectoryOnly ? "Verify official storefront URL" : "Review storefront & calculate score",
+        nextFollowUpAt: null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        archivedAt: null,
+      });
+
+      // Membership in Global E-Commerce Leads
+      memberships.push({
+        id: `mem_global_${i}`,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        collectionId: GLOBAL_ECOM_COLLECTION_ID,
+        organizationId: orgId,
+        collectionCategories: [niche],
+        stageId: "stg_new",
+        score: null,
+        scoreIsManual: false,
+        scoreBreakdown: {},
+        customValues: {},
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+
+      // Also add to India D2C or International E-Commerce collection
+      const secondaryCollectionId = isIndia ? "col_india_d2c" : "col_intl_ecommerce";
+      memberships.push({
+        id: `mem_market_${i}`,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        collectionId: secondaryCollectionId,
+        organizationId: orgId,
+        collectionCategories: [niche],
+        stageId: "stg_new",
+        score: null,
+        scoreIsManual: false,
+        scoreBreakdown: {},
+        customValues: {},
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+
+      sourceRecords.push({
+        id: `src_row_${i}`,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        importBatchId: batchId,
+        organizationId: orgId,
+        sourceFilename: LEDGER_FILENAME,
+        sheetName: "Leads",
+        rowNumber: i + 1,
+        externalId: leadId,
+        rawValues: {
+          "Lead ID": leadId,
+          "Discovery Date": discoveryDate,
+          Market: market,
+          Country: country,
+          Business: businessName,
+          Niche: niche,
+          "Official Website": website,
+          "Observed Fact (from site)": observedFact,
+          "Source URL": sourceUrl,
+          "Published Business Contact": publishedContact,
+          "Contact Evidence URL": contactEvidenceUrl,
+          Status: "candidate",
+          "Qualification Decision": "not reviewed",
+          "Outreach Approval": "not approved",
+          "Opt-Out": "unknown",
+          "Prior Contact Check": "no prior contact",
+          "Verification Level": verificationLevel,
+          Notes: sourceNote,
+        },
+        validationWarnings: !evidenceCheck.isValid && evidenceCheck.warning ? [evidenceCheck.warning] : [],
+        importedAt: nowIso,
+      });
+    }
+  }
+
+  const today = new Date().toISOString().split("T")[0];
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+
+  const tasks = include200Leads
+    ? [
+        {
+          id: "tsk_local_1",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "Audit Apex Furniture Studio mobile product gallery & LCP speed",
+          description: "Prepare 3-point UX & speed observation before qualifying lead.",
+          taskType: "Send Website Audit",
+          organizationId: "org_ecom_in_001",
+          opportunityId: null,
+          contactId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          priority: "high",
+          status: "To Do",
+          dueDate: today,
+          dueTime: "14:00",
+          reminderSetting: "day_of",
+          notes: "Observed 140+ solid wood SKUs on Shopify without image zoom.",
+          completedAt: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+        {
+          id: "tsk_local_2",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "Verify Contact Evidence URL anomaly ('49') on ECOM-IN-049",
+          description: "Inspect contact page manually and replace raw numeric cell value.",
+          taskType: "Review Website",
+          organizationId: "org_ecom_in_049",
+          opportunityId: null,
+          contactId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          priority: "high",
+          status: "To Do",
+          dueDate: yesterday,
+          dueTime: "11:00",
+          reminderSetting: "day_of",
+          notes: "Flagged automatically during Global E-Commerce Lead Ledger import.",
+          completedAt: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+        {
+          id: "tsk_local_3",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "Verify Contact Evidence URL anomaly ('sent') on ECOM-INTL-012",
+          description: "Confirm no outreach was sent and locate official contact page URL.",
+          taskType: "Review Website",
+          organizationId: "org_ecom_intl_012",
+          opportunityId: null,
+          contactId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          priority: "medium",
+          status: "To Do",
+          dueDate: tomorrow,
+          dueTime: "16:00",
+          reminderSetting: "day_of",
+          notes: "Preserved raw 'sent' string without reclassifying lead as Contacted.",
+          completedAt: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ]
+    : [];
+
+  const references = include200Leads
+    ? [
+        {
+          id: "ref_local_1",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "Apex Furniture Studio — Product Gallery & Checkout UX Reference",
+          url: "https://apexfurniture.in",
+          description: "High-ticket furniture catalog needing 3D preview & sticky mobile cart.",
+          category: "Redesign Opportunity",
+          tags: ["Shopify", "Home & Furniture", "Mobile UX"],
+          screenshotUrl: null,
+          notes: "Great candidate for custom Next.js headless storefront or theme speed overhaul.",
+          organizationId: "org_ecom_in_001",
+          opportunityId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          createdAt: nowIso,
+        },
+        {
+          id: "ref_local_2",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "AuraBotanics London — Skincare Quiz Funnel Breakdown",
+          url: "https://aurabotanics.co.uk",
+          description: "Clean beauty quiz funnel that drops users on a static page instead of dynamic bundle cart.",
+          category: "AI Automation Opportunity",
+          tags: ["AI Concierge", "Beauty & Skincare", "UK"],
+          screenshotUrl: null,
+          notes: "Strong use case for AI skincare advisor + instant cart bundle builder.",
+          organizationId: "org_ecom_intl_002",
+          opportunityId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          createdAt: nowIso,
+        },
+      ]
+    : [];
+
+  const contentIdeas = include200Leads
+    ? [
+        {
+          id: "cid_local_1",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          title: "Why D2C Furniture Stores Lose Mobile Buyers at the Gallery Step",
+          hook: "If you sell ₹45,000 solid wood furniture online, a non-zoomable mobile gallery kills trust.",
+          description: "Breakdown of mobile LCP, image zoom, and dimension calculator UX for Indian furniture brands.",
+          platform: "Instagram Reels",
+          contentType: "Website Audit / Breakdown",
+          organizationId: "org_ecom_in_001",
+          referenceId: "ref_local_1",
+          category: "Good Reel",
+          priority: "high",
+          status: "Scripted",
+          notes: "Derived from Apex Furniture Studio observation in Global E-Commerce Lead Ledger.",
+          targetPublicationDate: tomorrow,
+          publishedUrl: null,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        },
+      ]
+    : [];
+
+  const importBatches = include200Leads
+    ? [
+        {
+          id: batchId,
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          filename: LEDGER_FILENAME,
+          fileFormat: "xlsx",
+          selectedSheet: "Leads",
+          totalRowsRead: 200,
+          newRecordsCreated: 200,
+          existingMatched: 0,
+          recordsUpdated: 0,
+          duplicatesSkipped: 0,
+          rowsRequiringReview: 10,
+          failedRowsCount: 0,
+          duplicatePolicy: "fill_blanks",
+          mappingConfig: {
+            "Lead ID": "externalId",
+            "Discovery Date": "discoveryDate",
+            Market: "market",
+            Country: "country",
+            Business: "name",
+            Niche: "industry",
+            "Official Website": "websiteUrl",
+            "Observed Fact (from site)": "observedFacts",
+            "Source URL": "sourceUrl",
+            "Published Business Contact": "publishedContact",
+            "Contact Evidence URL": "contactEvidenceUrl",
+            Status: "sourceLeadStatus",
+            "Qualification Decision": "qualificationDecision",
+            "Outreach Approval": "outreachApproval",
+            "Opt-Out": "optOutStatus",
+            "Prior Contact Check": "priorContactCheck",
+            "Verification Level": "verificationLevel",
+            Notes: "sourceNotes",
+          },
+          warningsSummary,
+          runLogProvenance: [
+            {
+              "Run Date": "2026-09-30",
+              "India Candidates": 100,
+              "International Candidates": 100,
+              "Total Candidates": 200,
+              "Official Website Observed": 192,
+              "Directory-Only Unresolved": 8,
+              "Duplicate Domains Within Run": 0,
+              "Cross-Run Duplicate Check": "Passed (0 cross-run collisions)",
+              "Messages Sent": 0,
+              "Qualification Status": "All 200 marked not reviewed / not approved",
+            },
+          ],
+          createdOrganizationIds,
+          status: "completed",
+          createdAt: nowIso,
+        },
+      ]
+    : [];
+
+  const activities = include200Leads
+    ? [
+        {
+          id: "act_local_init",
+          workspaceId: DEFAULT_WORKSPACE_ID,
+          organizationId: null,
+          opportunityId: null,
+          contactId: null,
+          collectionId: GLOBAL_ECOM_COLLECTION_ID,
+          actorOrigin: "import",
+          activityType: "lead_imported",
+          title: `200 leads initialized in Local Browser Storage from ${LEDGER_FILENAME}`,
+          description: "100 India + 100 International leads (192 site description, 8 directory listing only; '49' and 'sent' anomalies flagged).",
+          metadata: { batchId, newRecordsCreated: 200 },
+          createdAt: nowIso,
+        },
+      ]
+    : [];
+
+  return {
+    version: 1,
+    lastSavedAt: nowIso,
+    workspace: {
+      id: DEFAULT_WORKSPACE_ID,
+      name: "Jayant Web & AI Systems",
+      defaultCurrency: "INR",
+      timezone: "Asia/Kolkata",
+      dateFormat: "DD MMM YYYY",
+      theme: "dark",
+      defaultLandingPage: "/dashboard",
+      storageMode: "local_browser_storage",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    },
+    collections,
+    categories,
+    tags,
+    fieldDefinitions,
+    pipelines: [
+      {
+        id: DEFAULT_PIPELINE_ID,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        name: "Agency Sales & Qualification Pipeline",
+        description: "Primary lead qualification, discovery, outreach, and deal closing workflow",
+        isDefault: true,
+        createdAt: nowIso,
+      },
+    ],
+    pipelineStages: stages,
+    organizations,
+    memberships,
+    opportunities: [],
+    contacts: [],
+    tasks,
+    notes: [],
+    activities,
+    attachments: [],
+    references,
+    contentIdeas,
+    importBatches,
+    sourceRecords,
+    stageHistory: [],
+    suppressions: [],
+    savedViews: [],
+    savedMappings: [],
+  };
+}
+
+function saveToIndexedDB(dbState: LocalWorkspaceDB): void {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const req = window.indexedDB.open(IDB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(IDB_STORE)) {
+        db.createObjectStore(IDB_STORE);
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(dbState, LOCAL_STORAGE_DB_KEY);
+    };
+  } catch {
+    // Ignore IDB fallback errors
+  }
+}
+
+export function loadLocalBrowserDB(): LocalWorkspaceDB {
+  if (typeof window === "undefined") {
+    return buildDefaultLocalBrowserDB(true);
+  }
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_DB_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as LocalWorkspaceDB;
+      if (parsed && Array.isArray(parsed.organizations) && Array.isArray(parsed.collections)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to parse localStorage DB, initializing fresh state:", err);
+  }
+
+  const initial = buildDefaultLocalBrowserDB(true);
+  saveLocalBrowserDB(initial);
+  return initial;
+}
+
+export function saveLocalBrowserDB(state: LocalWorkspaceDB): void {
+  if (typeof window === "undefined") return;
+  state.lastSavedAt = new Date().toISOString();
+  try {
+    window.localStorage.setItem(LOCAL_STORAGE_DB_KEY, JSON.stringify(state));
+  } catch (err) {
+    console.warn("localStorage quota warning, persisting full state in IndexedDB:", err);
+  }
+  saveToIndexedDB(state);
+  window.dispatchEvent(new CustomEvent("jayant-crm-local-storage-updated"));
+}
+
+export function getLocalBrowserStorageStats(): {
+  leadCount: number;
+  collectionCount: number;
+  taskCount: number;
+  opportunityCount: number;
+  sizeKB: number;
+  lastSavedAt: string;
+} {
+  if (typeof window === "undefined") {
+    return {
+      leadCount: 200,
+      collectionCount: 5,
+      taskCount: 3,
+      opportunityCount: 0,
+      sizeKB: 0,
+      lastSavedAt: new Date().toISOString(),
+    };
+  }
+  const raw = window.localStorage.getItem(LOCAL_STORAGE_DB_KEY) || "";
+  const sizeKB = Math.round((raw.length * 2) / 1024);
+  const state = loadLocalBrowserDB();
+  return {
+    leadCount: state.organizations.filter((o) => !o.archivedAt).length,
+    collectionCount: state.collections.filter((c) => !c.archivedAt).length,
+    taskCount: state.tasks.length,
+    opportunityCount: state.opportunities.length,
+    sizeKB,
+    lastSavedAt: state.lastSavedAt,
+  };
+}
+
+function formatFullWorkspaceResponse(state: LocalWorkspaceDB) {
+  const activeOrgs = state.organizations.filter((o) => !o.archivedAt);
+  const activeOrgIds = new Set(activeOrgs.map((o) => o.id));
+  const collectionCounts: Record<string, number> = {};
+  const orgCollectionsMap: Record<string, string[]> = {};
+
+  for (const m of state.memberships) {
+    if (!activeOrgIds.has(m.organizationId)) continue;
+    collectionCounts[m.collectionId] = (collectionCounts[m.collectionId] || 0) + 1;
+    if (!orgCollectionsMap[m.organizationId]) {
+      orgCollectionsMap[m.organizationId] = [];
+    }
+    orgCollectionsMap[m.organizationId].push(m.collectionId);
+  }
+
+  return {
+    workspace: state.workspace,
+    collections: state.collections
+      .filter((c) => !c.archivedAt)
+      .map((c) => ({
+        ...c,
+        leadCount: collectionCounts[c.id] || 0,
+      })),
+    categories: state.categories,
+    tags: state.tags,
+    fieldDefinitions: state.fieldDefinitions.filter((f) => !f.archivedAt),
+    pipelines: state.pipelines,
+    pipelineStages: state.pipelineStages,
+    organizations: activeOrgs.map((o) => ({
+      ...o,
+      collectionIds: orgCollectionsMap[o.id] || [],
+    })),
+    memberships: state.memberships,
+    opportunities: state.opportunities,
+    contacts: state.contacts,
+    tasks: state.tasks,
+    notes: state.notes,
+    activities: state.activities.slice(0, 120),
+    references: state.references,
+    contentIdeas: state.contentIdeas,
+    importBatches: state.importBatches,
+    suppressions: state.suppressions,
+    savedViews: state.savedViews,
+    savedMappings: state.savedMappings,
+  };
+}
+
+function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSearchParams) {
+  const includeArchived = searchParams.get("includeArchived") === "true";
+  const collectionId = searchParams.get("collectionId") || undefined;
+  const search = searchParams.get("search") || undefined;
+  const market = searchParams.get("market") || undefined;
+  const country = searchParams.get("country") || undefined;
+  const category = searchParams.get("category") || undefined;
+  const stageId = searchParams.get("stageId") || undefined;
+  const verificationLevel = searchParams.get("verificationLevel") || undefined;
+  const qualificationDecision = searchParams.get("qualificationDecision") || undefined;
+  const outreachApproval = searchParams.get("outreachApproval") || undefined;
+  const tag = searchParams.get("tag") || undefined;
+  const minScore = searchParams.get("minScore") ? Number(searchParams.get("minScore")) : undefined;
+  const hasWarning = searchParams.get("hasWarning") === "true";
+  const sortBy = searchParams.get("sortBy") || "updatedAt";
+  const sortDir = searchParams.get("sortDir") || "desc";
+  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const pageSize = Math.max(1, Math.min(5000, Number(searchParams.get("pageSize") || "50")));
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orgToMems = new Map<string, Array<Record<string, any>>>();
+  for (const m of state.memberships) {
+    const arr = orgToMems.get(m.organizationId) || [];
+    arr.push(m);
+    orgToMems.set(m.organizationId, arr);
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let filtered: Array<Record<string, any>> = state.organizations
+    .filter((o) => (includeArchived ? true : !o.archivedAt))
+    .map((org) => {
+      const mems = orgToMems.get(org.id) || [];
+      const activeMembership = collectionId
+        ? mems.find((m) => m.collectionId === collectionId)
+        : undefined;
+      return {
+        ...org,
+        collectionIds: mems.map((m) => m.collectionId),
+        collectionCategories: activeMembership?.collectionCategories || org.categories || [],
+        effectiveScore: activeMembership?.score ?? org.score,
+        effectiveCustomValues: {
+          ...(org.customValues || {}),
+          ...(activeMembership?.customValues || {}),
+        },
+      };
+    });
+
+  if (collectionId) {
+    filtered = filtered.filter((o) => o.collectionIds.includes(collectionId));
+  }
+  if (search && search.trim()) {
+    const q = search.trim().toLowerCase();
+    filtered = filtered.filter(
+      (o) =>
+        (o.name || "").toLowerCase().includes(q) ||
+        (o.websiteUrl || "").toLowerCase().includes(q) ||
+        (o.normalizedDomain || "").toLowerCase().includes(q) ||
+        (o.country || "").toLowerCase().includes(q) ||
+        (o.industry || "").toLowerCase().includes(q) ||
+        (o.externalId || "").toLowerCase().includes(q) ||
+        (o.observedFacts || "").toLowerCase().includes(q) ||
+        (o.publishedContact || "").toLowerCase().includes(q) ||
+        (o.tags || []).some((t: string) => t.toLowerCase().includes(q)) ||
+        (o.categories || []).some((c: string) => c.toLowerCase().includes(q))
+    );
+  }
+  if (market) {
+    filtered = filtered.filter((o) => (o.market || "").toLowerCase() === market.toLowerCase());
+  }
+  if (country) {
+    filtered = filtered.filter((o) => (o.country || "").toLowerCase() === country.toLowerCase());
+  }
+  if (category) {
+    const cLow = category.toLowerCase();
+    filtered = filtered.filter(
+      (o) =>
+        (o.industry || "").toLowerCase() === cLow ||
+        (o.categories || []).some((c: string) => c.toLowerCase() === cLow) ||
+        (o.collectionCategories || []).some((c: string) => c.toLowerCase() === cLow)
+    );
+  }
+  if (stageId) {
+    filtered = filtered.filter((o) => o.primaryStageId === stageId);
+  }
+  if (verificationLevel) {
+    filtered = filtered.filter(
+      (o) => (o.verificationLevel || "").toLowerCase() === verificationLevel.toLowerCase()
+    );
+  }
+  if (qualificationDecision) {
+    filtered = filtered.filter(
+      (o) => (o.qualificationDecision || "").toLowerCase() === qualificationDecision.toLowerCase()
+    );
+  }
+  if (outreachApproval) {
+    filtered = filtered.filter(
+      (o) => (o.outreachApproval || "").toLowerCase() === outreachApproval.toLowerCase()
+    );
+  }
+  if (tag) {
+    const tLow = tag.toLowerCase();
+    filtered = filtered.filter((o) => (o.tags || []).some((t: string) => t.toLowerCase() === tLow));
+  }
+  if (minScore !== undefined && !Number.isNaN(minScore)) {
+    filtered = filtered.filter((o) => o.effectiveScore !== null && o.effectiveScore >= minScore);
+  }
+  if (hasWarning) {
+    filtered = filtered.filter(
+      (o) =>
+        !o.contactEvidenceValid ||
+        (o.verificationLevel || "").toLowerCase().includes("directory")
+    );
+  }
+
+  filtered.sort((a, b) => {
+    let cmp = 0;
+    if (sortBy === "name") {
+      cmp = (a.name || "").localeCompare(b.name || "");
+    } else if (sortBy === "score") {
+      cmp = (a.effectiveScore ?? -1) - (b.effectiveScore ?? -1);
+    } else if (sortBy === "country") {
+      cmp = (a.country || "").localeCompare(b.country || "");
+    } else if (sortBy === "createdAt") {
+      cmp = new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+    } else {
+      cmp = new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime();
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const totalCount = filtered.length;
+  const offset = (page - 1) * pageSize;
+  const rows = filtered.slice(offset, offset + pageSize);
+
+  return {
+    rows,
+    totalCount,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+  };
+}
+
+// ============================================================================
+// CLIENT-SIDE SPREADSHEET PARSER & IMPORTER FOR LOCAL BROWSER STORAGE
+// ============================================================================
+const HEADER_SYNONYMS: Record<string, string> = {
+  "lead id": "externalId",
+  "lead_id": "externalId",
+  id: "externalId",
+  "discovery date": "discoveryDate",
+  market: "market",
+  country: "country",
+  city: "city",
+  business: "name",
+  company: "name",
+  "company name": "name",
+  "business name": "name",
+  niche: "industry",
+  industry: "industry",
+  "official website": "websiteUrl",
+  website: "websiteUrl",
+  "observed fact (from site)": "observedFacts",
+  "observed facts": "observedFacts",
+  "source url": "sourceUrl",
+  "published business contact": "publishedContact",
+  "published contact": "publishedContact",
+  "contact evidence url": "contactEvidenceUrl",
+  status: "sourceLeadStatus",
+  "qualification decision": "qualificationDecision",
+  "outreach approval": "outreachApproval",
+  "opt-out": "optOutStatus",
+  "prior contact check": "priorContactCheck",
+  "verification level": "verificationLevel",
+  notes: "sourceNotes",
+};
+
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cur += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      result.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+function parseCsvTextToObjects(text: string): {
+  headers: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows: Array<Record<string, any>>;
+} {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const headers = parseCsvLine(lines[0]).filter(Boolean);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: Array<Record<string, any>> = [];
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseCsvLine(lines[i]);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const obj: Record<string, any> = {};
+    headers.forEach((h, idx) => {
+      obj[h] = vals[idx] ?? "";
+    });
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
+async function parseBrowserSpreadsheet(
+  arrayBuffer: ArrayBuffer,
+  filename: string
+): Promise<{
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  inspection: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sheetRowsMap: Record<string, Array<Record<string, any>>>;
+}> {
+  const isCsv = filename.toLowerCase().endsWith(".csv");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sheetRowsMap: Record<string, Array<Record<string, any>>> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sheetsInfo: Array<Record<string, any>> = [];
+
+  if (isCsv) {
+    const text = new TextDecoder("utf-8").decode(arrayBuffer);
+    const { headers, rows } = parseCsvTextToObjects(text);
+    sheetRowsMap["CSV Sheet"] = rows;
+    const suggestedMapping: Record<string, string> = {};
+    for (const h of headers) {
+      const norm = h.trim().toLowerCase();
+      suggestedMapping[h] =
+        HEADER_SYNONYMS[norm] || `custom:${norm.replace(/[^a-z0-9]+/g, "_")}`;
+    }
+    sheetsInfo.push({
+      name: "CSV Sheet",
+      sheetRole: "leads",
+      headerRowNumber: 1,
+      totalDataRows: rows.length,
+      emptyRowsCount: 0,
+      headers,
+      duplicateHeaders: [],
+      suggestedMapping,
+      sampleRows: rows.slice(0, 10),
+      columnStats: headers.map((h) => ({
+        header: h,
+        inferredType: "text",
+        nonEmptyCount: rows.filter((r) => r[h] !== undefined && r[h] !== "").length,
+        missingCount: rows.filter((r) => !r[h]).length,
+        malformedUrlCount: 0,
+        sampleValues: rows
+          .slice(0, 3)
+          .map((r) => String(r[h] ?? ""))
+          .filter(Boolean),
+      })),
+    });
+  } else {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(arrayBuffer);
+    workbook.eachSheet((ws) => {
+      const sheetName = ws.name;
+      const lower = sheetName.toLowerCase();
+      const sheetRole = lower.includes("run log")
+        ? "run_log"
+        : lower.includes("do not contact") || lower.includes("suppression")
+        ? "do_not_contact"
+        : "leads";
+
+      const headerRow = ws.getRow(1);
+      const headers: string[] = [];
+      headerRow.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        headers[colNumber - 1] = String(cell.text || cell.value || `Column_${colNumber}`).trim();
+      });
+      const cleanHeaders = headers.filter(Boolean);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows: Array<Record<string, any>> = [];
+      ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber === 1) return;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const obj: Record<string, any> = {};
+        let hasVal = false;
+        headers.forEach((h, idx) => {
+          if (!h) return;
+          const cell = row.getCell(idx + 1);
+          const val = cell.text !== undefined ? cell.text : cell.value;
+          const strVal = val === null || val === undefined ? "" : String(val).trim();
+          obj[h] = strVal;
+          if (strVal !== "") hasVal = true;
+        });
+        if (hasVal) rows.push(obj);
+      });
+
+      sheetRowsMap[sheetName] = rows;
+      const suggestedMapping: Record<string, string> = {};
+      for (const h of cleanHeaders) {
+        const norm = h.trim().toLowerCase();
+        suggestedMapping[h] =
+          HEADER_SYNONYMS[norm] || `custom:${norm.replace(/[^a-z0-9]+/g, "_")}`;
+      }
+
+      sheetsInfo.push({
+        name: sheetName,
+        sheetRole,
+        headerRowNumber: 1,
+        totalDataRows: rows.length,
+        emptyRowsCount: 0,
+        headers: cleanHeaders,
+        duplicateHeaders: [],
+        suggestedMapping,
+        sampleRows: rows.slice(0, 10),
+        columnStats: cleanHeaders.map((h) => ({
+          header: h,
+          inferredType: h.toLowerCase().includes("url") || h.toLowerCase().includes("website") ? "url" : "text",
+          nonEmptyCount: rows.filter((r) => r[h] !== undefined && r[h] !== "").length,
+          missingCount: rows.filter((r) => !r[h]).length,
+          malformedUrlCount: 0,
+          sampleValues: rows
+            .slice(0, 3)
+            .map((r) => String(r[h] ?? ""))
+            .filter(Boolean),
+        })),
+      });
+    });
+  }
+
+  const recommendedLeadSheet =
+    sheetsInfo.find((s) => s.sheetRole === "leads")?.name || sheetsInfo[0]?.name || "Leads";
+  const runLogSheet = sheetsInfo.find((s) => s.sheetRole === "run_log")?.name;
+  const doNotContactSheet = sheetsInfo.find((s) => s.sheetRole === "do_not_contact")?.name;
+
+  return {
+    inspection: {
+      filename,
+      fileFormat: isCsv ? "csv" : "xlsx",
+      fileSizeBytes: arrayBuffer.byteLength,
+      sheets: sheetsInfo,
+      recommendedLeadSheet,
+      runLogSheet,
+      doNotContactSheet,
+    },
+    sheetRowsMap,
+  };
+}
+
+function previewLocalSpreadsheetImport(
+  state: LocalWorkspaceDB,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sheetRowsMap: Record<string, Array<Record<string, any>>>,
+  filename: string,
+  selectedSheet: string,
+  mapping: Record<string, string>
+) {
+  const rows = sheetRowsMap[selectedSheet] || [];
+  const existingByDomain = new Map<string, Record<string, unknown>>();
+  const existingByExtId = new Map<string, Record<string, unknown>>();
+  const existingByNameCountry = new Map<string, Record<string, unknown>>();
+
+  for (const org of state.organizations) {
+    if (org.normalizedDomain) existingByDomain.set(org.normalizedDomain, org);
+    if (org.externalId) existingByExtId.set(String(org.externalId).toLowerCase(), org);
+    const nc = `${normalizeOrganizationName(org.name)}|${(org.country || "").toLowerCase()}`;
+    existingByNameCountry.set(nc, org);
+  }
+
+  let newCount = 0;
+  let exactMatchCount = 0;
+  let possibleMatchCount = 0;
+  const conflictCount = 0;
+  let invalidCount = 0;
+  let warningsCount = 0;
+  let directoryOnlyCount = 0;
+  let siteDescriptionCount = 0;
+  let indiaMarketCount = 0;
+  let internationalMarketCount = 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const previewRows: Array<Record<string, any>> = [];
+
+  rows.forEach((rawRow, idx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mapped: Record<string, any> = {
+      externalId: null,
+      discoveryDate: null,
+      market: null,
+      country: null,
+      city: null,
+      name: "",
+      industry: null,
+      websiteUrl: null,
+      normalizedDomain: null,
+      observedFacts: null,
+      sourceUrl: null,
+      publishedContact: null,
+      contactEvidenceUrl: null,
+      contactEvidenceValid: true,
+      contactEvidenceWarning: null,
+      sourceLeadStatus: "candidate",
+      qualificationDecision: "not reviewed",
+      outreachApproval: "not approved",
+      optOutStatus: "unknown",
+      priorContactCheck: "not checked",
+      verificationLevel: "unverified",
+      sourceNotes: null,
+      customValues: {},
+    };
+
+    for (const [header, targetField] of Object.entries(mapping)) {
+      if (!targetField || targetField === "__ignore__") continue;
+      const val = rawRow[header] !== undefined ? String(rawRow[header]).trim() : "";
+      if (!val) continue;
+      if (targetField.startsWith("custom:")) {
+        mapped.customValues[targetField.slice(7)] = val;
+      } else {
+        mapped[targetField] = val;
+      }
+    }
+
+    const warnings: Array<{ field: string; value: string; message: string }> = [];
+    const evCheck = validateUrlField(mapped.contactEvidenceUrl, "Contact Evidence URL");
+    mapped.contactEvidenceValid = evCheck.isValid;
+    mapped.contactEvidenceWarning = evCheck.warning;
+    if (!evCheck.isValid && evCheck.warning && mapped.contactEvidenceUrl) {
+      warnings.push({
+        field: "Contact Evidence URL",
+        value: String(mapped.contactEvidenceUrl),
+        message: evCheck.warning,
+      });
+    }
+
+    const webCheck = validateUrlField(mapped.websiteUrl, "Website");
+    mapped.normalizedDomain = webCheck.isValid ? normalizeDomain(mapped.websiteUrl) : null;
+
+    if ((mapped.verificationLevel || "").toLowerCase().includes("directory")) {
+      directoryOnlyCount++;
+      warnings.push({
+        field: "Verification Level",
+        value: mapped.verificationLevel,
+        message: "Directory listing only — requires manual website verification.",
+      });
+    } else if ((mapped.verificationLevel || "").toLowerCase().includes("site")) {
+      siteDescriptionCount++;
+    }
+
+    if ((mapped.market || "").toLowerCase() === "india") indiaMarketCount++;
+    else if (mapped.market) internationalMarketCount++;
+
+    if (warnings.length > 0) warningsCount += warnings.length;
+
+    if (!mapped.name) {
+      invalidCount++;
+      previewRows.push({
+        rowNumber: idx + 2,
+        status: "invalid",
+        conflicts: [],
+        warnings,
+        isSuppressed: false,
+        mappedData: mapped,
+        rawValues: rawRow,
+      });
+      return;
+    }
+
+    const matchedByDom = mapped.normalizedDomain
+      ? existingByDomain.get(mapped.normalizedDomain)
+      : undefined;
+    const matchedByExt = mapped.externalId
+      ? existingByExtId.get(String(mapped.externalId).toLowerCase())
+      : undefined;
+    const ncKey = `${normalizeOrganizationName(mapped.name)}|${(mapped.country || "").toLowerCase()}`;
+    const matchedByName = existingByNameCountry.get(ncKey);
+
+    const match = matchedByDom || matchedByExt || matchedByName;
+    if (match) {
+      if (matchedByDom || matchedByExt) exactMatchCount++;
+      else possibleMatchCount++;
+      previewRows.push({
+        rowNumber: idx + 2,
+        status: matchedByDom || matchedByExt ? "exact_match" : "possible_match",
+        matchReason: matchedByDom
+          ? `Canonical domain match (${mapped.normalizedDomain})`
+          : matchedByExt
+          ? `External Lead ID match (${mapped.externalId})`
+          : "Normalized business name + country match",
+        matchedOrganizationId: match.id as string,
+        matchedOrganizationName: match.name as string,
+        conflicts: [],
+        warnings,
+        isSuppressed: false,
+        mappedData: mapped,
+        rawValues: rawRow,
+      });
+    } else {
+      newCount++;
+      previewRows.push({
+        rowNumber: idx + 2,
+        status: "new",
+        conflicts: [],
+        warnings,
+        isSuppressed: false,
+        mappedData: mapped,
+        rawValues: rawRow,
+      });
+    }
+  });
+
+  const runLogKey = Object.keys(sheetRowsMap).find((k) => k.toLowerCase().includes("run log"));
+  const dncKey = Object.keys(sheetRowsMap).find((k) => k.toLowerCase().includes("do not contact"));
+
+  return {
+    filename,
+    sheetName: selectedSheet,
+    totalRows: rows.length,
+    newCount,
+    exactMatchCount,
+    possibleMatchCount,
+    conflictCount,
+    invalidCount,
+    warningsCount,
+    directoryOnlyCount,
+    siteDescriptionCount,
+    indiaMarketCount,
+    internationalMarketCount,
+    runLogRows: runLogKey ? sheetRowsMap[runLogKey] : [],
+    suppressionRows: dncKey ? sheetRowsMap[dncKey] : [],
+    rows: previewRows,
+  };
+}
+
+// ============================================================================
+// BROWSER FETCH INTERCEPTOR FOR 100% LOCAL BROWSER STORAGE OPERATION
+// ============================================================================
+let interceptorInstalled = false;
+let cachedFixtureBuffer: ArrayBuffer | null = null;
+
+async function getBrowserLedgerFixtureBuffer(): Promise<ArrayBuffer> {
+  if (cachedFixtureBuffer) return cachedFixtureBuffer;
+  const workbook = new ExcelJS.Workbook();
+  const tempState = buildDefaultLocalBrowserDB(true);
+  const wsLeads = workbook.addWorksheet("Leads");
+  const headers = [
+    "Lead ID",
+    "Discovery Date",
+    "Market",
+    "Country",
+    "Business",
+    "Niche",
+    "Official Website",
+    "Observed Fact (from site)",
+    "Source URL",
+    "Published Business Contact",
+    "Contact Evidence URL",
+    "Status",
+    "Qualification Decision",
+    "Outreach Approval",
+    "Opt-Out",
+    "Prior Contact Check",
+    "Verification Level",
+    "Notes",
+  ];
+  wsLeads.addRow(headers);
+  for (const sr of tempState.sourceRecords) {
+    const rv = sr.rawValues || {};
+    wsLeads.addRow(headers.map((h) => rv[h] ?? ""));
+  }
+  const wsRunLog = workbook.addWorksheet("Run Log");
+  wsRunLog.addRow([
+    "Run Date",
+    "India Candidates",
+    "International Candidates",
+    "Total Candidates",
+    "Official Website Observed",
+    "Directory-Only Unresolved",
+    "Messages Sent",
+    "Qualification Status",
+  ]);
+  wsRunLog.addRow([
+    "2026-09-30",
+    100,
+    100,
+    200,
+    192,
+    8,
+    0,
+    "All 200 marked not reviewed / not approved",
+  ]);
+  const wsDnc = workbook.addWorksheet("Do Not Contact");
+  wsDnc.addRow([
+    "Business / Domain",
+    "Contact / Channel",
+    "Opt-Out Date",
+    "Reason / Source",
+    "Do Not Contact Status",
+    "Notes",
+  ]);
+  const buf = await workbook.xlsx.writeBuffer();
+  cachedFixtureBuffer = buf;
+  return buf;
+}
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export function installLocalBrowserStorageInterceptor(): void {
+  if (typeof window === "undefined" || interceptorInstalled) return;
+  interceptorInstalled = true;
+
+  // Ensure Local Browser Storage is initialized on startup
+  loadLocalBrowserDB();
+
+  const nativeFetch = window.fetch.bind(window);
+
+  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.toString()
+        : input.url;
+
+    const parsedUrl = new URL(urlStr, window.location.origin);
+    const pathname = parsedUrl.pathname;
+    const method = (init?.method || "GET").toUpperCase();
+
+    // 1. Intercept /api/workspace (100% Local Browser Storage)
+    if (pathname === "/api/workspace") {
+      const state = loadLocalBrowserDB();
+
+      if (method === "GET") {
+        const view = parsedUrl.searchParams.get("view") || "full";
+        if (view === "lead_detail") {
+          const id = parsedUrl.searchParams.get("id");
+          const org = state.organizations.find((o) => o.id === id);
+          if (!org) return jsonResponse({ error: "Lead not found" }, 404);
+          return jsonResponse({
+            organization: org,
+            memberships: state.memberships.filter((m) => m.organizationId === id),
+            contacts: state.contacts.filter((c) => c.organizationId === id),
+            opportunities: state.opportunities.filter((o) => o.organizationId === id),
+            notes: state.notes
+              .filter((n) => n.organizationId === id)
+              .sort((a, b) => Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned))),
+            tasks: state.tasks.filter((t) => t.organizationId === id),
+            activities: state.activities.filter((a) => a.organizationId === id),
+            attachments: state.attachments.filter((a) => a.organizationId === id),
+            sourceRecords: state.sourceRecords.filter((s) => s.organizationId === id),
+            stageHistory: state.stageHistory.filter((h) => h.organizationId === id),
+            references: state.references.filter((r) => r.organizationId === id),
+            contentIdeas: state.contentIdeas.filter((c) => c.organizationId === id),
+          });
+        }
+
+        if (view === "leads_paginated") {
+          return jsonResponse(queryLocalLeadsPaginated(state, parsedUrl.searchParams));
+        }
+
+        return jsonResponse(formatFullWorkspaceResponse(state));
+      }
+
+      if (method === "POST") {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        const { action, payload = {} } = body;
+        const nowIso = new Date().toISOString();
+
+        switch (action) {
+          case "upsert_lead":
+          case "inline_update_lead": {
+            const targetId = payload.id;
+            const updates = action === "inline_update_lead" ? payload.updates || {} : payload;
+
+            if (targetId) {
+              const idx = state.organizations.findIndex((o) => o.id === targetId);
+              if (idx === -1) return jsonResponse({ error: "Lead not found" }, 404);
+              const existing = state.organizations[idx];
+
+              const nextWeb =
+                updates.websiteUrl !== undefined ? updates.websiteUrl : existing.websiteUrl;
+              const nextEv =
+                updates.contactEvidenceUrl !== undefined
+                  ? updates.contactEvidenceUrl
+                  : existing.contactEvidenceUrl;
+              const evCheck = validateUrlField(nextEv, "Contact Evidence URL");
+
+              if (
+                updates.primaryStageId &&
+                updates.primaryStageId !== existing.primaryStageId
+              ) {
+                const fromStg = state.pipelineStages.find((s) => s.id === existing.primaryStageId);
+                const toStg = state.pipelineStages.find((s) => s.id === updates.primaryStageId);
+                state.stageHistory.unshift({
+                  id: uid("psh"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  organizationId: targetId,
+                  fromStageId: existing.primaryStageId,
+                  fromStageName: fromStg?.name || existing.primaryStageId,
+                  toStageId: updates.primaryStageId,
+                  toStageName: toStg?.name || updates.primaryStageId,
+                  changedBy: "user",
+                  createdAt: nowIso,
+                });
+                state.activities.unshift({
+                  id: uid("act"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  organizationId: targetId,
+                  actorOrigin: "user",
+                  activityType: "stage_changed",
+                  title: `Pipeline stage moved to ${toStg?.name || updates.primaryStageId}`,
+                  createdAt: nowIso,
+                });
+              }
+
+              state.organizations[idx] = {
+                ...existing,
+                ...updates,
+                name: (updates.name ?? existing.name).trim(),
+                normalizedName: normalizeOrganizationName(updates.name ?? existing.name),
+                normalizedDomain: nextWeb ? normalizeDomain(nextWeb) : null,
+                contactEvidenceValid: evCheck.isValid,
+                contactEvidenceWarning: evCheck.warning,
+                customValues: updates.customValues
+                  ? { ...(existing.customValues || {}), ...updates.customValues }
+                  : existing.customValues,
+                updatedAt: nowIso,
+              };
+
+              if (Array.isArray(updates.collectionIds)) {
+                for (const colId of updates.collectionIds) {
+                  const hasMem = state.memberships.some(
+                    (m) => m.collectionId === colId && m.organizationId === targetId
+                  );
+                  if (!hasMem) {
+                    state.memberships.push({
+                      id: uid("mem"),
+                      workspaceId: DEFAULT_WORKSPACE_ID,
+                      collectionId: colId,
+                      organizationId: targetId,
+                      collectionCategories:
+                        updates.categories || state.organizations[idx].categories || [],
+                      stageId: state.organizations[idx].primaryStageId || "stg_new",
+                      customValues: {},
+                      createdAt: nowIso,
+                      updatedAt: nowIso,
+                    });
+                  }
+                }
+              }
+
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: targetId });
+            }
+
+            // Create new lead in Local Browser Storage
+            const newId = uid("org");
+            const evCheck = validateUrlField(updates.contactEvidenceUrl, "Contact Evidence URL");
+            const normDomain = updates.websiteUrl ? normalizeDomain(updates.websiteUrl) : null;
+            const newOrg = {
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              externalId: null,
+              discoveryDate: nowIso.split("T")[0],
+              name: String(updates.name || "Untitled Business").trim(),
+              normalizedName: normalizeOrganizationName(updates.name || "Untitled Business"),
+              websiteUrl: updates.websiteUrl || null,
+              normalizedDomain: normDomain,
+              country: updates.country || null,
+              city: updates.city || null,
+              market:
+                updates.market ||
+                (String(updates.country || "").toLowerCase() === "india"
+                  ? "India"
+                  : updates.country
+                  ? "International"
+                  : "India"),
+              industry: updates.industry || null,
+              description: updates.description || null,
+              observedFacts: updates.observedFacts || null,
+              publishedContact: updates.publishedContact || null,
+              contactEvidenceUrl: updates.contactEvidenceUrl || null,
+              contactEvidenceValid: evCheck.isValid,
+              contactEvidenceWarning: evCheck.warning,
+              sourceLeadStatus: "manual",
+              qualificationDecision: updates.qualificationDecision || "not reviewed",
+              outreachApproval: updates.outreachApproval || "not approved",
+              optOutStatus: "unknown",
+              priorContactCheck: "not checked",
+              verificationLevel:
+                updates.verificationLevel || (normDomain ? "site description" : "unverified"),
+              primaryPipelineId: DEFAULT_PIPELINE_ID,
+              primaryStageId: updates.primaryStageId || "stg_new",
+              categories:
+                updates.categories || (updates.industry ? [updates.industry] : []),
+              tags: updates.tags || [],
+              score: updates.score ?? null,
+              scoreIsManual: updates.score !== undefined && updates.score !== null,
+              scoreMethod: updates.score !== undefined ? "manual" : "unscored",
+              scoreBreakdown: updates.scoreBreakdown || {},
+              nextAction: updates.nextAction || null,
+              customValues: updates.customValues || {},
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              archivedAt: null,
+            };
+
+            state.organizations.unshift(newOrg);
+            const colIds =
+              Array.isArray(updates.collectionIds) && updates.collectionIds.length > 0
+                ? updates.collectionIds
+                : [GLOBAL_ECOM_COLLECTION_ID];
+            for (const colId of colIds) {
+              state.memberships.push({
+                id: uid("mem"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                collectionId: colId,
+                organizationId: newId,
+                collectionCategories: newOrg.categories,
+                stageId: newOrg.primaryStageId,
+                customValues: newOrg.customValues,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+            }
+            if (updates.initialNote && String(updates.initialNote).trim()) {
+              state.notes.unshift({
+                id: uid("note"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                organizationId: newId,
+                content: String(updates.initialNote).trim(),
+                isPinned: true,
+                origin: "user",
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+            }
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: newId,
+              actorOrigin: "user",
+              activityType: "lead_created",
+              title: `Lead created in Local Browser Storage: ${newOrg.name}`,
+              createdAt: nowIso,
+            });
+
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "bulk_update_leads": {
+            const { ids = [], operation, value } = payload;
+            const idSet = new Set(ids);
+            if (operation === "permanent_delete") {
+              state.organizations = state.organizations.filter((o) => !idSet.has(o.id));
+              state.memberships = state.memberships.filter((m) => !idSet.has(m.organizationId));
+            } else {
+              for (const org of state.organizations) {
+                if (!idSet.has(org.id)) continue;
+                if (operation === "change_stage" && value) org.primaryStageId = value;
+                else if (operation === "add_tag" && value) {
+                  org.tags = Array.from(new Set([...(org.tags || []), String(value).trim()]));
+                } else if (operation === "set_qualification" && value) {
+                  org.qualificationDecision = value;
+                } else if (operation === "archive") {
+                  org.archivedAt = nowIso;
+                } else if (operation === "restore") {
+                  org.archivedAt = null;
+                } else if (operation === "assign_collection" && value) {
+                  const exists = state.memberships.some(
+                    (m) => m.collectionId === value && m.organizationId === org.id
+                  );
+                  if (!exists) {
+                    state.memberships.push({
+                      id: uid("mem"),
+                      workspaceId: DEFAULT_WORKSPACE_ID,
+                      collectionId: value,
+                      organizationId: org.id,
+                      collectionCategories: org.categories || [],
+                      stageId: org.primaryStageId || "stg_new",
+                      customValues: {},
+                      createdAt: nowIso,
+                      updatedAt: nowIso,
+                    });
+                  }
+                } else if (operation === "remove_from_collection" && value) {
+                  state.memberships = state.memberships.filter(
+                    (m) => !(m.collectionId === value && idSet.has(m.organizationId))
+                  );
+                }
+                org.updatedAt = nowIso;
+              }
+            }
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              actorOrigin: "user",
+              activityType: "bulk_action",
+              title: `Bulk action (${operation}) applied to ${ids.length} lead(s)`,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, count: ids.length });
+          }
+
+          case "calculate_score": {
+            const { organizationId, dimensionInputs = {}, collectionId, manualOverrideScore } =
+              payload;
+            const col = state.collections.find((c) => c.id === collectionId);
+            const config: ScoringConfigJSON = col?.scoringConfig || DEFAULT_SCORING_CONFIG;
+            const calc = calculateLeadScore(dimensionInputs, config);
+            const isManual =
+              manualOverrideScore !== undefined && manualOverrideScore !== null;
+            const finalScore = isManual
+              ? Math.max(0, Math.min(100, Math.round(Number(manualOverrideScore))))
+              : calc.score;
+
+            const org = state.organizations.find((o) => o.id === organizationId);
+            if (org) {
+              org.score = finalScore;
+              org.scoreIsManual = isManual;
+              org.scoreMethod = isManual ? "manual_override" : calc.method;
+              org.scoreBreakdown = calc.normalizedBreakdown;
+              org.scoreUpdatedAt = nowIso;
+              org.updatedAt = nowIso;
+            }
+            for (const m of state.memberships) {
+              if (m.organizationId === organizationId && (!collectionId || m.collectionId === collectionId)) {
+                m.score = finalScore;
+                m.scoreIsManual = isManual;
+                m.scoreBreakdown = calc.normalizedBreakdown;
+                m.updatedAt = nowIso;
+              }
+            }
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId,
+              actorOrigin: isManual ? "user" : "system",
+              activityType: "score_updated",
+              title: `Opportunity score updated to ${finalScore ?? "Unscored"}/100`,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({
+              ok: true,
+              score: finalScore,
+              isManual,
+              breakdown: calc.normalizedBreakdown,
+            });
+          }
+
+          case "create_collection": {
+            const id = uid("col");
+            const slug = String(payload.name || "collection")
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-");
+            state.collections.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              name: String(payload.name).trim(),
+              slug,
+              description: payload.description || null,
+              icon: payload.icon || "FolderKanban",
+              color: payload.color || "#7958F5",
+              recordType: payload.recordType || "company",
+              defaultView: payload.defaultView || "table",
+              defaultPipelineId: DEFAULT_PIPELINE_ID,
+              scoringConfig: payload.scoringConfig || DEFAULT_SCORING_CONFIG,
+              isPinned: true,
+              isVisibleInSidebar: true,
+              sortOrder: state.collections.length + 1,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+              archivedAt: null,
+            });
+            if (Array.isArray(payload.categories)) {
+              payload.categories.forEach((catName: string, i: number) => {
+                if (!catName.trim()) return;
+                state.categories.push({
+                  id: uid("cat"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  collectionId: id,
+                  name: catName.trim(),
+                  color: payload.color || "#7958F5",
+                  sortOrder: i + 1,
+                  createdAt: nowIso,
+                });
+              });
+            }
+            if (Array.isArray(payload.customFields)) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              payload.customFields.forEach((cf: any, i: number) => {
+                if (!cf.name?.trim()) return;
+                state.fieldDefinitions.push({
+                  id: uid("fld"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  collectionId: id,
+                  name: cf.name.trim(),
+                  key: cf.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+                  fieldType: cf.fieldType || "text",
+                  isRequired: Boolean(cf.isRequired),
+                  isVisible: true,
+                  sortOrder: i + 1,
+                  options: cf.options || [],
+                  createdAt: nowIso,
+                  archivedAt: null,
+                });
+              });
+            }
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "update_collection": {
+            const col = state.collections.find((c) => c.id === payload.id);
+            if (col) {
+              if (payload.name !== undefined) col.name = payload.name;
+              if (payload.description !== undefined) col.description = payload.description;
+              if (payload.icon !== undefined) col.icon = payload.icon;
+              if (payload.color !== undefined) col.color = payload.color;
+              if (payload.defaultView !== undefined) col.defaultView = payload.defaultView;
+              if (payload.isPinned !== undefined) col.isPinned = Boolean(payload.isPinned);
+              if (payload.scoringConfig !== undefined) col.scoringConfig = payload.scoringConfig;
+              if (payload.archived !== undefined) col.archivedAt = payload.archived ? nowIso : null;
+              col.updatedAt = nowIso;
+              saveLocalBrowserDB(state);
+            }
+            return jsonResponse({ ok: true });
+          }
+
+          case "duplicate_collection": {
+            const src = state.collections.find((c) => c.id === payload.id);
+            if (!src) return jsonResponse({ error: "Collection not found" }, 404);
+            const newId = uid("col");
+            state.collections.push({
+              ...src,
+              id: newId,
+              name: `${src.name} (Copy)`,
+              slug: `${src.slug}-copy`,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "delete_collection": {
+            state.memberships = state.memberships.filter((m) => m.collectionId !== payload.id);
+            state.collections = state.collections.filter((c) => c.id !== payload.id);
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "create_custom_field": {
+            const id = uid("fld");
+            const key = String(payload.name)
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "_");
+            state.fieldDefinitions.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              collectionId: payload.collectionId || null,
+              name: String(payload.name).trim(),
+              key,
+              fieldType: payload.fieldType || "text",
+              description: payload.description || null,
+              defaultValue: payload.defaultValue || null,
+              isRequired: Boolean(payload.isRequired),
+              isVisible: true,
+              sortOrder: state.fieldDefinitions.length + 1,
+              options: Array.isArray(payload.options) ? payload.options : [],
+              createdAt: nowIso,
+              archivedAt: null,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id, key });
+          }
+
+          case "archive_custom_field": {
+            const fld = state.fieldDefinitions.find((f) => f.id === payload.id);
+            if (fld) fld.archivedAt = nowIso;
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "create_category": {
+            const id = uid("cat");
+            state.categories.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              collectionId: payload.collectionId || null,
+              name: String(payload.name).trim(),
+              color: payload.color || "#7958F5",
+              sortOrder: state.categories.length + 1,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "delete_category": {
+            state.categories = state.categories.filter((c) => c.id !== payload.id);
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "create_tag": {
+            const id = uid("tag");
+            state.tags.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              name: String(payload.name).trim(),
+              color: payload.color || "#659BFA",
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "upsert_opportunity": {
+            if (payload.id) {
+              const idx = state.opportunities.findIndex((o) => o.id === payload.id);
+              if (idx !== -1) {
+                state.opportunities[idx] = {
+                  ...state.opportunities[idx],
+                  ...payload,
+                  updatedAt: nowIso,
+                };
+              }
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: payload.id });
+            }
+            const newId = uid("opp");
+            state.opportunities.unshift({
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId,
+              collectionId: payload.collectionId || null,
+              primaryContactId: payload.primaryContactId || null,
+              name: String(payload.name).trim(),
+              serviceType: payload.serviceType || "Website Development",
+              description: payload.description || null,
+              pipelineId: payload.pipelineId || DEFAULT_PIPELINE_ID,
+              stageId: payload.stageId || "stg_new",
+              estimatedValue: payload.estimatedValue ? String(payload.estimatedValue) : null,
+              currency: payload.currency || "INR",
+              probability: payload.probability ? Number(payload.probability) : null,
+              priority: payload.priority || "medium",
+              expectedCloseDate: payload.expectedCloseDate || null,
+              nextAction: payload.nextAction || null,
+              notes: payload.notes || null,
+              outcome: payload.outcome || "open",
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId,
+              opportunityId: newId,
+              actorOrigin: "user",
+              activityType: "opportunity_created",
+              title: `Opportunity created: ${String(payload.name).trim()}`,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "upsert_contact": {
+            if (payload.id) {
+              const idx = state.contacts.findIndex((c) => c.id === payload.id);
+              if (idx !== -1) {
+                state.contacts[idx] = {
+                  ...state.contacts[idx],
+                  ...payload,
+                  updatedAt: nowIso,
+                };
+              }
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: payload.id });
+            }
+            const newId = uid("cnt");
+            state.contacts.unshift({
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId || null,
+              fullName: String(payload.fullName).trim(),
+              jobTitle: payload.jobTitle || null,
+              department: payload.department || null,
+              email: payload.email || null,
+              phone: payload.phone || null,
+              linkedinUrl: payload.linkedinUrl || null,
+              preferredChannel: payload.preferredChannel || null,
+              country: payload.country || null,
+              city: payload.city || null,
+              notes: payload.notes || null,
+              doNotContact: Boolean(payload.doNotContact),
+              optOutRecorded: Boolean(payload.doNotContact),
+              approvalStatus: payload.doNotContact ? "suppressed" : payload.approvalStatus || "not approved",
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "add_suppression": {
+            const id = uid("dnc");
+            const normDom = normalizeDomain(payload.businessOrDomain);
+            state.suppressions.unshift({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              businessOrDomain: String(payload.businessOrDomain).trim(),
+              normalizedDomain: normDom,
+              contactOrChannel: payload.contactOrChannel || null,
+              optOutDate: nowIso.split("T")[0],
+              reasonOrSource: payload.reasonOrSource || "Manual user exclusion",
+              status: "Do Not Contact",
+              notes: payload.notes || null,
+              createdAt: nowIso,
+            });
+            if (normDom) {
+              for (const org of state.organizations) {
+                if (org.normalizedDomain === normDom) {
+                  org.optOutStatus = "opted out / suppressed";
+                  org.outreachApproval = "do not contact";
+                  org.updatedAt = nowIso;
+                }
+              }
+            }
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "add_note": {
+            const id = uid("note");
+            state.notes.unshift({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId || null,
+              opportunityId: payload.opportunityId || null,
+              contactId: payload.contactId || null,
+              content: String(payload.content).trim(),
+              isPinned: Boolean(payload.isPinned),
+              origin: "user",
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId || null,
+              actorOrigin: "user",
+              activityType: "note_added",
+              title: "Note added to record",
+              description: String(payload.content).trim().slice(0, 140),
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "toggle_pin_note": {
+            const note = state.notes.find((n) => n.id === payload.id);
+            if (note) {
+              note.isPinned = Boolean(payload.isPinned);
+              note.updatedAt = nowIso;
+              saveLocalBrowserDB(state);
+            }
+            return jsonResponse({ ok: true });
+          }
+
+          case "delete_note": {
+            state.notes = state.notes.filter((n) => n.id !== payload.id);
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "upsert_task": {
+            if (payload.id) {
+              const idx = state.tasks.findIndex((t) => t.id === payload.id);
+              if (idx !== -1) {
+                state.tasks[idx] = {
+                  ...state.tasks[idx],
+                  ...payload,
+                  completedAt: payload.status === "Completed" ? nowIso : null,
+                  updatedAt: nowIso,
+                };
+              }
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: payload.id });
+            }
+            const newId = uid("tsk");
+            const resolvedDate = payload.dueDate || nowIso.split("T")[0];
+            state.tasks.unshift({
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              title: String(payload.title).trim(),
+              description: payload.description || null,
+              taskType: payload.taskType || "Follow-up",
+              organizationId: payload.organizationId || null,
+              opportunityId: payload.opportunityId || null,
+              contactId: payload.contactId || null,
+              collectionId: payload.collectionId || null,
+              priority: payload.priority || "medium",
+              status: payload.status || "To Do",
+              dueDate: resolvedDate,
+              dueTime: payload.dueTime || null,
+              reminderSetting: payload.reminderSetting || "day_of",
+              notes: payload.notes || null,
+              completedAt: null,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            if (payload.organizationId) {
+              const org = state.organizations.find((o) => o.id === payload.organizationId);
+              if (org) {
+                org.nextAction = String(payload.title).trim();
+                org.nextFollowUpAt = `${resolvedDate}T${payload.dueTime || "10:00"}:00Z`;
+                org.updatedAt = nowIso;
+              }
+            }
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "toggle_task_status": {
+            const t = state.tasks.find((item) => item.id === payload.id);
+            if (!t) return jsonResponse({ error: "Task not found" }, 404);
+            const nextStatus = payload.status || (t.status === "Completed" ? "To Do" : "Completed");
+            t.status = nextStatus;
+            t.completedAt = nextStatus === "Completed" ? nowIso : null;
+            t.updatedAt = nowIso;
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, status: nextStatus });
+          }
+
+          case "log_manual_activity": {
+            const id = uid("act");
+            state.activities.unshift({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId || null,
+              contactId: payload.contactId || null,
+              opportunityId: payload.opportunityId || null,
+              actorOrigin: "user",
+              activityType: payload.activityType || "manual_log",
+              title: `[Manually Logged] ${payload.title}`,
+              description: payload.description || null,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "add_attachment": {
+            const id = uid("att");
+            state.attachments.unshift({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              organizationId: payload.organizationId,
+              filename: String(payload.filename),
+              mimeType: String(payload.mimeType || "application/octet-stream"),
+              sizeBytes: Number(payload.sizeBytes || 0),
+              category: payload.category || "Document",
+              dataUrl: String(payload.dataUrl),
+              notes: payload.notes || null,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "upsert_reference": {
+            if (payload.id) {
+              const idx = state.references.findIndex((r) => r.id === payload.id);
+              if (idx !== -1) state.references[idx] = { ...state.references[idx], ...payload };
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: payload.id });
+            }
+            const newId = uid("ref");
+            state.references.unshift({
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              title: String(payload.title).trim(),
+              url: String(payload.url).trim(),
+              description: payload.description || null,
+              category: payload.category || "For Reference",
+              tags: Array.isArray(payload.tags) ? payload.tags : [],
+              screenshotUrl: payload.screenshotUrl || null,
+              notes: payload.notes || null,
+              organizationId: payload.organizationId || null,
+              opportunityId: payload.opportunityId || null,
+              collectionId: payload.collectionId || null,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "upsert_content_idea": {
+            if (payload.id) {
+              const idx = state.contentIdeas.findIndex((c) => c.id === payload.id);
+              if (idx !== -1) {
+                state.contentIdeas[idx] = {
+                  ...state.contentIdeas[idx],
+                  ...payload,
+                  updatedAt: nowIso,
+                };
+              }
+              saveLocalBrowserDB(state);
+              return jsonResponse({ ok: true, id: payload.id });
+            }
+            const newId = uid("cid");
+            state.contentIdeas.unshift({
+              id: newId,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              title: String(payload.title).trim(),
+              hook: payload.hook || null,
+              description: payload.description || null,
+              platform: payload.platform || "Instagram Reels",
+              contentType: payload.contentType || "Website Audit / Breakdown",
+              organizationId: payload.organizationId || null,
+              referenceId: payload.referenceId || null,
+              category: payload.category || "Good Reel",
+              priority: payload.priority || "medium",
+              status: payload.status || "Idea",
+              notes: payload.notes || null,
+              targetPublicationDate: payload.targetPublicationDate || null,
+              publishedUrl: payload.publishedUrl || null,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id: newId });
+          }
+
+          case "save_view": {
+            const id = uid("view");
+            state.savedViews.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              collectionId: payload.collectionId || null,
+              name: String(payload.name).trim(),
+              filters: payload.filters || {},
+              sortConfig: payload.sortConfig || {},
+              visibleColumns: payload.visibleColumns || [],
+              viewMode: payload.viewMode || "table",
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "delete_saved_view": {
+            state.savedViews = state.savedViews.filter((v) => v.id !== payload.id);
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "save_mapping_template": {
+            const id = uid("map");
+            state.savedMappings.push({
+              id,
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              name: String(payload.name).trim(),
+              mapping: payload.mapping || {},
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, id });
+          }
+
+          case "update_workspace_settings": {
+            state.workspace = {
+              ...state.workspace,
+              ...payload,
+              updatedAt: nowIso,
+            };
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true });
+          }
+
+          case "reset_to_empty_workspace": {
+            const emptyState = buildDefaultLocalBrowserDB(false);
+            saveLocalBrowserDB(emptyState);
+            return jsonResponse({ ok: true });
+          }
+
+          case "reseed_workspace": {
+            const seededState = buildDefaultLocalBrowserDB(true);
+            saveLocalBrowserDB(seededState);
+            return jsonResponse({ ok: true, seeded: true, leadCount: 200 });
+          }
+
+          case "restore_json_backup": {
+            if (payload.backupData && Array.isArray(payload.backupData.organizations)) {
+              const nextState: LocalWorkspaceDB = {
+                ...buildDefaultLocalBrowserDB(false),
+                ...payload.backupData,
+                version: 1,
+                lastSavedAt: nowIso,
+              };
+              saveLocalBrowserDB(nextState);
+              return jsonResponse({ ok: true, leadCount: nextState.organizations.length });
+            }
+            return jsonResponse({ error: "Invalid JSON backup file" }, 400);
+          }
+
+          default:
+            return jsonResponse({ ok: true });
+        }
+      }
+    }
+
+    // 2. Intercept /api/import (100% Local Browser Storage spreadsheet import & rollback)
+    if (pathname === "/api/import" && method === "POST") {
+      try {
+        const state = loadLocalBrowserDB();
+        let mode = "inspect";
+        let filename = LEDGER_FILENAME;
+        let arrayBuffer: ArrayBuffer | null = null;
+        let selectedSheet = "Leads";
+        let collectionId = GLOBAL_ECOM_COLLECTION_ID;
+        let mapping: Record<string, string> = {};
+        let duplicatePolicy = "fill_blanks";
+        let batchId: string | undefined;
+
+        if (init?.body instanceof FormData) {
+          const formData = init.body;
+          mode = String(formData.get("mode") || "inspect");
+          const file = formData.get("file") as File | null;
+          const useFixture = formData.get("useFixture") === "true";
+          if (useFixture) {
+            arrayBuffer = await getBrowserLedgerFixtureBuffer();
+            filename = LEDGER_FILENAME;
+          } else if (file) {
+            filename = file.name;
+            arrayBuffer = await file.arrayBuffer();
+          }
+          if (formData.get("selectedSheet")) selectedSheet = String(formData.get("selectedSheet"));
+          if (formData.get("collectionId")) collectionId = String(formData.get("collectionId"));
+          if (formData.get("mapping")) mapping = JSON.parse(String(formData.get("mapping")));
+          if (formData.get("duplicatePolicy")) duplicatePolicy = String(formData.get("duplicatePolicy"));
+        } else if (init?.body) {
+          const body = JSON.parse(String(init.body));
+          mode = body.mode || "inspect";
+          selectedSheet = body.selectedSheet || "Leads";
+          collectionId = body.collectionId || GLOBAL_ECOM_COLLECTION_ID;
+          mapping = body.mapping || {};
+          duplicatePolicy = body.duplicatePolicy || "fill_blanks";
+          batchId = body.batchId;
+
+          if (body.useFixture) {
+            arrayBuffer = await getBrowserLedgerFixtureBuffer();
+            filename = LEDGER_FILENAME;
+          } else if (body.fileBase64 && body.filename) {
+            filename = String(body.filename);
+            const binary = window.atob(String(body.fileBase64));
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            arrayBuffer = bytes.buffer;
+          }
+        }
+
+        if (mode === "rollback") {
+          const batch = state.importBatches.find((b) => b.id === batchId);
+          if (!batch) return jsonResponse({ error: "Import batch not found" }, 404);
+          const createdIds: string[] = batch.createdOrganizationIds || [];
+          let deletedCount = 0;
+          let preservedCount = 0;
+          for (const orgId of createdIds) {
+            const org = state.organizations.find((o) => o.id === orgId);
+            if (!org) continue;
+            const hasUserEdits =
+              org.scoreIsManual ||
+              state.notes.some((n) => n.organizationId === orgId) ||
+              state.tasks.some((t) => t.organizationId === orgId) ||
+              state.opportunities.some((o) => o.organizationId === orgId);
+            if (hasUserEdits) {
+              preservedCount++;
+            } else {
+              state.organizations = state.organizations.filter((o) => o.id !== orgId);
+              state.memberships = state.memberships.filter((m) => m.organizationId !== orgId);
+              deletedCount++;
+            }
+          }
+          batch.status = "rolled_back";
+          saveLocalBrowserDB(state);
+          return jsonResponse({
+            ok: true,
+            status: "rolled_back",
+            deletedCount,
+            preservedCount,
+          });
+        }
+
+        if (!arrayBuffer) {
+          return jsonResponse({ error: "No spreadsheet file provided." }, 400);
+        }
+
+        const { inspection, sheetRowsMap } = await parseBrowserSpreadsheet(arrayBuffer, filename);
+
+        if (mode === "inspect") {
+          const bytes = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+          return jsonResponse({
+            ok: true,
+            inspection,
+            fileBase64: window.btoa(binary),
+          });
+        }
+
+        const preview = previewLocalSpreadsheetImport(
+          state,
+          sheetRowsMap,
+          filename,
+          selectedSheet,
+          mapping
+        );
+
+        if (mode === "preview") {
+          return jsonResponse({ ok: true, preview });
+        }
+
+        if (mode === "execute") {
+          const nowIso = new Date().toISOString();
+          const newBatchId = uid("imp");
+          let newRecordsCreated = 0;
+          let existingMatched = 0;
+          let recordsUpdated = 0;
+          let duplicatesSkipped = 0;
+          const createdOrganizationIds: string[] = [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const warningsSummary: Array<Record<string, any>> = [];
+
+          for (const row of preview.rows) {
+            if (row.status === "invalid") continue;
+            const m = row.mappedData;
+            for (const w of row.warnings) {
+              warningsSummary.push({
+                rowNumber: row.rowNumber,
+                externalId: m.externalId,
+                business: m.name,
+                field: w.field,
+                value: w.value,
+                message: w.message,
+              });
+            }
+
+            if (row.matchedOrganizationId) {
+              existingMatched++;
+              if (duplicatePolicy === "skip_existing") {
+                duplicatesSkipped++;
+                continue;
+              }
+              const existingOrg = state.organizations.find((o) => o.id === row.matchedOrganizationId);
+              if (existingOrg && duplicatePolicy !== "keep_existing") {
+                recordsUpdated++;
+                if (duplicatePolicy === "use_imported") {
+                  existingOrg.industry = m.industry || existingOrg.industry;
+                  existingOrg.observedFacts = m.observedFacts || existingOrg.observedFacts;
+                  existingOrg.publishedContact = m.publishedContact || existingOrg.publishedContact;
+                } else {
+                  // fill_blanks
+                  if (!existingOrg.industry && m.industry) existingOrg.industry = m.industry;
+                  if (!existingOrg.observedFacts && m.observedFacts)
+                    existingOrg.observedFacts = m.observedFacts;
+                  if (!existingOrg.publishedContact && m.publishedContact)
+                    existingOrg.publishedContact = m.publishedContact;
+                }
+                existingOrg.updatedAt = nowIso;
+              }
+              const hasMem = state.memberships.some(
+                (mem) =>
+                  mem.collectionId === collectionId &&
+                  mem.organizationId === row.matchedOrganizationId
+              );
+              if (!hasMem) {
+                state.memberships.push({
+                  id: uid("mem"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  collectionId,
+                  organizationId: row.matchedOrganizationId,
+                  collectionCategories: m.industry ? [m.industry] : [],
+                  stageId: "stg_new",
+                  customValues: m.customValues || {},
+                  createdAt: nowIso,
+                  updatedAt: nowIso,
+                });
+              }
+            } else {
+              const newOrgId = uid("org");
+              newRecordsCreated++;
+              createdOrganizationIds.push(newOrgId);
+              state.organizations.unshift({
+                id: newOrgId,
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                externalId: m.externalId,
+                discoveryDate: m.discoveryDate || nowIso.split("T")[0],
+                name: m.name,
+                normalizedName: normalizeOrganizationName(m.name),
+                websiteUrl: m.websiteUrl,
+                normalizedDomain: m.normalizedDomain,
+                market: m.market || (String(m.country || "").toLowerCase() === "india" ? "India" : "International"),
+                country: m.country,
+                city: m.city,
+                industry: m.industry,
+                description: m.observedFacts,
+                observedFacts: m.observedFacts,
+                sourceUrl: m.sourceUrl,
+                publishedContact: m.publishedContact,
+                contactEvidenceUrl: m.contactEvidenceUrl,
+                contactEvidenceValid: m.contactEvidenceValid,
+                contactEvidenceWarning: m.contactEvidenceWarning,
+                sourceLeadStatus: m.sourceLeadStatus || "candidate",
+                qualificationDecision: m.qualificationDecision || "not reviewed",
+                outreachApproval: m.outreachApproval || "not approved",
+                optOutStatus: m.optOutStatus || "unknown",
+                priorContactCheck: m.priorContactCheck || "not checked",
+                verificationLevel: m.verificationLevel || "unverified",
+                sourceNotes: m.sourceNotes,
+                primaryPipelineId: DEFAULT_PIPELINE_ID,
+                primaryStageId: "stg_new",
+                categories: m.industry ? [m.industry] : [],
+                tags: [],
+                customValues: m.customValues || {},
+                score: null,
+                scoreIsManual: false,
+                scoreMethod: "unscored",
+                scoreBreakdown: {},
+                createdAt: nowIso,
+                updatedAt: nowIso,
+                archivedAt: null,
+              });
+              state.memberships.push({
+                id: uid("mem"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                collectionId,
+                organizationId: newOrgId,
+                collectionCategories: m.industry ? [m.industry] : [],
+                stageId: "stg_new",
+                customValues: m.customValues || {},
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+              state.sourceRecords.push({
+                id: uid("src"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                importBatchId: newBatchId,
+                organizationId: newOrgId,
+                sourceFilename: filename,
+                sheetName: selectedSheet,
+                rowNumber: row.rowNumber,
+                externalId: m.externalId,
+                rawValues: row.rawValues,
+                validationWarnings: row.warnings.map((w: { message: string }) => w.message),
+                importedAt: nowIso,
+              });
+            }
+          }
+
+          const batchRecord = {
+            id: newBatchId,
+            workspaceId: DEFAULT_WORKSPACE_ID,
+            collectionId,
+            filename,
+            fileFormat: filename.toLowerCase().endsWith(".csv") ? "csv" : "xlsx",
+            selectedSheet,
+            totalRowsRead: preview.totalRows,
+            newRecordsCreated,
+            existingMatched,
+            recordsUpdated,
+            duplicatesSkipped,
+            rowsRequiringReview: warningsSummary.length,
+            failedRowsCount: preview.invalidCount,
+            duplicatePolicy,
+            mappingConfig: mapping,
+            warningsSummary,
+            runLogProvenance: preview.runLogRows,
+            createdOrganizationIds,
+            status: "completed",
+            createdAt: nowIso,
+          };
+
+          state.importBatches.unshift(batchRecord);
+          state.activities.unshift({
+            id: uid("act"),
+            workspaceId: DEFAULT_WORKSPACE_ID,
+            collectionId,
+            actorOrigin: "import",
+            activityType: "lead_imported",
+            title: `${newRecordsCreated} new leads imported (${existingMatched} matched) into Local Browser Storage`,
+            createdAt: nowIso,
+          });
+          saveLocalBrowserDB(state);
+          return jsonResponse({ ok: true, batch: batchRecord });
+        }
+      } catch (err) {
+        return jsonResponse(
+          { error: err instanceof Error ? err.message : "Local spreadsheet import failed" },
+          500
+        );
+      }
+    }
+
+    // 3. Intercept /api/export (100% Local Browser Storage export)
+    if (pathname === "/api/export" && method === "GET") {
+      const state = loadLocalBrowserDB();
+      const format = parsedUrl.searchParams.get("format") || "csv";
+      if (format === "workspace_backup_json") {
+        return new Response(JSON.stringify(state, null, 2), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Content-Disposition": `attachment; filename="jayant-crm-local-storage-backup.json"`,
+          },
+        });
+      }
+      const { rows } = queryLocalLeadsPaginated(state, parsedUrl.searchParams);
+      if (format === "json") {
+        return new Response(JSON.stringify(rows, null, 2), {
+          status: 200,
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        });
+      }
+      const headers = [
+        "Lead ID",
+        "Company Name",
+        "Website",
+        "Normalized Domain",
+        "Market",
+        "Country",
+        "Niche / Industry",
+        "Score",
+        "Pipeline Stage ID",
+        "Source Lead Status",
+        "Qualification Decision",
+        "Outreach Approval",
+        "Verification Level",
+        "Published Contact",
+        "Contact Evidence URL",
+        "Observed Facts",
+      ];
+      const toCsv = (cells: unknown[]) =>
+        cells
+          .map((c) => {
+            const s = sanitizeSpreadsheetCell(c);
+            return s.includes(",") || s.includes('"') || s.includes("\n")
+              ? `"${s.replace(/"/g, '""')}"`
+              : s;
+          })
+          .join(",");
+      const csv = [
+        toCsv(headers),
+        ...rows.map((r) =>
+          toCsv([
+            r.externalId || r.id,
+            r.name,
+            r.websiteUrl || "",
+            r.normalizedDomain || "",
+            r.market || "",
+            r.country || "",
+            r.industry || "",
+            r.effectiveScore ?? "",
+            r.primaryStageId || "",
+            r.sourceLeadStatus || "",
+            r.qualificationDecision || "",
+            r.outreachApproval || "",
+            r.verificationLevel || "",
+            r.publishedContact || "",
+            r.contactEvidenceUrl || "",
+            r.observedFacts || "",
+          ])
+        ),
+      ].join("\n");
+      return new Response(csv, {
+        status: 200,
+        headers: { "Content-Type": "text/csv; charset=utf-8" },
+      });
+    }
+
+    return nativeFetch(input, init);
+  };
+}
+
+export function triggerLocalBrowserFileDownload(
+  format: "csv" | "json" | "workspace_backup_json",
+  collectionId?: string
+): void {
+  const state = loadLocalBrowserDB();
+  const dateStr = new Date().toISOString().split("T")[0];
+
+  if (format === "workspace_backup_json") {
+    const blob = new Blob([JSON.stringify(state, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jayant-crm-browser-storage-backup-${dateStr}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  const sp = new URLSearchParams({ pageSize: "5000" });
+  if (collectionId) sp.set("collectionId", collectionId);
+  const { rows } = queryLocalLeadsPaginated(state, sp);
+
+  if (format === "json") {
+    const blob = new Blob([JSON.stringify(rows, null, 2)], {
+      type: "application/json;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `jayant-crm-leads-${dateStr}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  const headers = [
+    "Lead ID",
+    "Company Name",
+    "Website",
+    "Normalized Domain",
+    "Market",
+    "Country",
+    "Niche / Industry",
+    "Score",
+    "Pipeline Stage ID",
+    "Source Lead Status",
+    "Qualification Decision",
+    "Outreach Approval",
+    "Verification Level",
+    "Published Contact",
+    "Contact Evidence URL",
+    "Observed Facts",
+  ];
+  const toCsv = (cells: unknown[]) =>
+    cells
+      .map((c) => {
+        const s = sanitizeSpreadsheetCell(c);
+        return s.includes(",") || s.includes('"') || s.includes("\n")
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      })
+      .join(",");
+  const csv = [
+    toCsv(headers),
+    ...rows.map((r) =>
+      toCsv([
+        r.externalId || r.id,
+        r.name,
+        r.websiteUrl || "",
+        r.normalizedDomain || "",
+        r.market || "",
+        r.country || "",
+        r.industry || "",
+        r.effectiveScore ?? "",
+        r.primaryStageId || "",
+        r.sourceLeadStatus || "",
+        r.qualificationDecision || "",
+        r.outreachApproval || "",
+        r.verificationLevel || "",
+        r.publishedContact || "",
+        r.contactEvidenceUrl || "",
+        r.observedFacts || "",
+      ])
+    ),
+  ].join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `jayant-crm-leads-${dateStr}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
