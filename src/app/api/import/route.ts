@@ -6,14 +6,13 @@ import {
   rollbackImportBatch,
   type DuplicateHandlingPolicy,
 } from "@/lib/importer";
-import { generateLedgerWorkbookBuffer, LEDGER_FILENAME } from "@/lib/ledger-fixture";
 import { DEFAULT_WORKSPACE_ID, GLOBAL_ECOM_COLLECTION_ID } from "@/db";
 
 export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get("content-type") || "";
     let mode = "inspect";
-    let filename = LEDGER_FILENAME;
+    let filename = "spreadsheet.xlsx";
     let buffer: Buffer | null = null;
     let selectedSheet = "Leads";
     let collectionId = GLOBAL_ECOM_COLLECTION_ID;
@@ -26,12 +25,8 @@ export async function POST(req: NextRequest) {
       const formData = await req.formData();
       mode = String(formData.get("mode") || "inspect");
       const file = formData.get("file") as File | null;
-      const useFixture = formData.get("useFixture") === "true";
 
-      if (useFixture) {
-        buffer = await generateLedgerWorkbookBuffer();
-        filename = LEDGER_FILENAME;
-      } else if (file) {
+      if (file) {
         filename = file.name;
         const lower = filename.toLowerCase();
         if (!lower.endsWith(".xlsx") && !lower.endsWith(".csv")) {
@@ -72,10 +67,7 @@ export async function POST(req: NextRequest) {
       headerRowNumber = body.headerRowNumber ? Number(body.headerRowNumber) : undefined;
       batchId = body.batchId;
 
-      if (body.useFixture) {
-        buffer = await generateLedgerWorkbookBuffer();
-        filename = LEDGER_FILENAME;
-      } else if (body.fileBase64 && body.filename) {
+      if (body.fileBase64 && body.filename) {
         filename = String(body.filename);
         buffer = Buffer.from(String(body.fileBase64), "base64");
       }
