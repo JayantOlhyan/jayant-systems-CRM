@@ -17,6 +17,7 @@ import {
   Search,
 } from "lucide-react";
 import { CRM_STANDARD_FIELDS } from "@/lib/domain-utils";
+import { triggerLocalBrowserFileDownload } from "@/lib/browser-storage";
 import type {
   WorkbookInspectionResult,
   ImportPreviewSummary,
@@ -1286,16 +1287,17 @@ export function ImportCenterView({
                 Export All Leads (Formula-Safe CSV)
               </h3>
               <p className="text-xs text-text-secondary mt-1.5">
-                Exports all active organizations with categories, tags, scores, verification status, and governance fields. Protected against CSV formula injection.
+                Exports all active organizations from Local Browser Storage with categories, tags, scores, verification status, and governance fields. Protected against CSV formula injection.
               </p>
             </div>
-            <a
-              href="/api/export?format=csv"
+            <button
+              type="button"
+              onClick={() => triggerLocalBrowserFileDownload("csv")}
               className="mt-5 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-xs font-semibold"
             >
               <Download className="w-4 h-4" />
               Download Leads (.CSV)
-            </a>
+            </button>
           </div>
 
           <div className="bg-app-surface border border-app-border rounded-xl p-5 flex flex-col justify-between">
@@ -1304,34 +1306,36 @@ export function ImportCenterView({
                 Export Structured Leads (.JSON)
               </h3>
               <p className="text-xs text-text-secondary mt-1.5">
-                Structured JSON export of all leads, custom field values, score breakdowns, and collection memberships.
+                Structured JSON export of all leads, custom field values, score breakdowns, and collection memberships from Local Browser Storage.
               </p>
             </div>
-            <a
-              href="/api/export?format=json"
+            <button
+              type="button"
+              onClick={() => triggerLocalBrowserFileDownload("json")}
               className="mt-5 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-app-elevated hover:bg-accent hover:text-white text-text-primary border border-app-border text-xs font-semibold transition"
             >
               <Download className="w-4 h-4" />
               Download Structured (.JSON)
-            </a>
+            </button>
           </div>
 
           <div className="bg-app-surface border border-app-border rounded-xl p-5 flex flex-col justify-between">
             <div>
               <h3 className="text-sm font-heading font-semibold text-text-primary">
-                Full Workspace Snapshot Backup
+                Full Local Browser Storage Backup
               </h3>
               <p className="text-xs text-text-secondary mt-1.5">
-                Complete portable backup of collections, custom field definitions, leads, opportunities, contacts, notes, tasks, references, and import history.
+                Complete portable snapshot of collections, custom field definitions, leads, opportunities, contacts, notes, tasks, references, and import history stored in your browser.
               </p>
             </div>
-            <a
-              href="/api/export?format=workspace_backup_json"
+            <button
+              type="button"
+              onClick={() => triggerLocalBrowserFileDownload("workspace_backup_json")}
               className="mt-5 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-app-elevated hover:bg-accent hover:text-white text-text-primary border border-app-border text-xs font-semibold transition"
             >
               <ShieldAlert className="w-4 h-4" />
-              Export Full CRM Backup (.JSON)
-            </a>
+              Export Full Browser Backup (.JSON)
+            </button>
           </div>
         </div>
       )}
