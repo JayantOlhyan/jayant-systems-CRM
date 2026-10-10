@@ -23,6 +23,7 @@ import {
   Tag,
   FolderKanban,
 } from "lucide-react";
+import { triggerLocalBrowserFileDownload } from "@/lib/browser-storage";
 
 interface LeadsDatabaseViewProps {
   collectionId?: string;
@@ -316,15 +317,14 @@ export function LeadsDatabaseView({
             })}
           </div>
 
-          <a
-            href={`/api/export?format=csv${collectionId ? `&collectionId=${collectionId}` : ""}${
-              marketFilter ? `&market=${marketFilter}` : ""
-            }`}
+          <button
+            type="button"
+            onClick={() => triggerLocalBrowserFileDownload("csv", collectionId)}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-secondary hover:text-text-primary"
           >
             <Download className="w-3.5 h-3.5" />
             Export CSV
-          </a>
+          </button>
 
           <button
             type="button"
