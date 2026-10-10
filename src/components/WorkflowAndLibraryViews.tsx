@@ -1503,14 +1503,15 @@ export function ReferencesAndContentView({
                             {ref.category}
                           </span>
                           <div className="flex items-center gap-2">
-                            <a
-                              href={ref.url}
-                              target="_blank"
-                              rel="noreferrer"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPreviewImage({ title: ref.title, url: ref.url })
+                              }
                               className="text-xs text-accent hover:underline inline-flex items-center gap-1 font-mono"
                             >
-                              Visit Site <ExternalLink className="w-3 h-3" />
-                            </a>
+                              Open in This Tab <ExternalLink className="w-3 h-3" />
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteRef(ref.id)}
@@ -1521,14 +1522,15 @@ export function ReferencesAndContentView({
                             </button>
                           </div>
                         </div>
-                        <a
-                          href={ref.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-xs text-text-primary hover:text-accent truncate block"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPreviewImage({ title: ref.title, url: ref.url })
+                          }
+                          className="font-mono text-xs text-text-primary hover:text-accent truncate block text-left"
                         >
                           {ref.url}
-                        </a>
+                        </button>
                       </div>
                     )}
 
@@ -1538,14 +1540,15 @@ export function ReferencesAndContentView({
                           {ref.title}
                         </h3>
                         {ref.url && !ref.url.startsWith("/") && (
-                          <a
-                            href={ref.url}
-                            target="_blank"
-                            rel="noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPreviewImage({ title: ref.title, url: ref.url })
+                            }
                             className="text-xs text-accent hover:underline inline-flex items-center gap-1 shrink-0 font-medium"
                           >
-                            Open <ExternalLink className="w-3 h-3" />
-                          </a>
+                            Open in Tab <ExternalLink className="w-3 h-3" />
+                          </button>
                         )}
                       </div>
                       <p className="text-xs text-text-secondary leading-relaxed">
@@ -1696,39 +1699,74 @@ export function ReferencesAndContentView({
         </div>
       )}
 
-      {/* Fullscreen Lightbox for Design Inspiration Image */}
-      {previewImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-6"
-          onClick={() => setPreviewImage(null)}
-        >
+      {/* Fullscreen Lightbox for Design Inspiration Image or Live Website In-Tab */}
+      {previewImage && (() => {
+        const isWebPage =
+          previewImage.url.startsWith("http") &&
+          !/\.(png|jpg|jpeg|webp|gif|svg)$/i.test(previewImage.url);
+
+        return (
           <div
-            className="max-w-5xl w-full bg-app-surface border border-app-border rounded-2xl overflow-hidden shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5"
+            onClick={() => setPreviewImage(null)}
           >
-            <div className="px-5 py-3.5 border-b border-app-border flex items-center justify-between">
-              <h3 className="font-heading font-bold text-sm text-text-primary">
-                {previewImage.title}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPreviewImage(null)}
-                className="p-1.5 rounded-lg bg-app-secondary text-text-secondary hover:text-text-primary"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="p-4 bg-app-bg max-h-[80vh] overflow-y-auto flex justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={previewImage.url}
-                alt={previewImage.title}
-                className="max-w-full h-auto rounded-lg border border-app-border"
-              />
+            <div
+              className="w-[96vw] max-w-[1440px] h-[90vh] bg-app-surface border border-app-border rounded-3xl flex flex-col overflow-hidden shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-6 py-4 border-b border-app-border bg-app-sidebar flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h3 className="font-heading font-bold text-base text-text-primary">
+                    {previewImage.title}
+                  </h3>
+                  {isWebPage && (
+                    <span className="font-mono text-xs text-text-muted truncate max-w-md">
+                      {previewImage.url}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {isWebPage && (
+                    <a
+                      href={previewImage.url}
+                      target="_self"
+                      className="px-3 py-1.5 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-secondary hover:text-text-primary"
+                    >
+                      Navigate This Tab
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewImage(null)}
+                    className="p-2 rounded-xl bg-app-surface text-text-secondary hover:text-text-primary border border-app-border"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              {isWebPage ? (
+                <div className="flex-1 bg-white">
+                  <iframe
+                    src={`/api/site-preview?url=${encodeURIComponent(previewImage.url)}`}
+                    title={previewImage.title}
+                    className="w-full h-full border-0"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                  />
+                </div>
+              ) : (
+                <div className="flex-1 p-6 bg-app-bg overflow-y-auto flex justify-center items-start">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewImage.url}
+                    alt={previewImage.title}
+                    className="max-w-full h-auto rounded-2xl border border-app-border"
+                  />
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Add Design Inspiration / Reference Modal */}
       {showAddRef && (
