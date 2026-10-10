@@ -10,13 +10,13 @@ import {
 } from "./domain-utils";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
 
-export const LOCAL_STORAGE_DB_KEY = "jayant_crm_local_db_v1";
-const IDB_NAME = "jayant_crm_idb_v1";
+export const LOCAL_STORAGE_DB_KEY = "jayant_crm_local_db_v2";
+const LEGACY_DUMMY_STORAGE_KEY = "jayant_crm_local_db_v1";
+const IDB_NAME = "jayant_crm_idb_v2";
 const IDB_STORE = "workspace_store";
 const DEFAULT_WORKSPACE_ID = "ws_jayant_main";
 const DEFAULT_PIPELINE_ID = "pip_agency_default";
 const GLOBAL_ECOM_COLLECTION_ID = "col_global_ecommerce";
-export const LEDGER_FILENAME = "Jayant Solution — Global E-Commerce Lead Ledger (2026).xlsx";
 
 function uid(prefix: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -77,33 +77,12 @@ export interface LocalWorkspaceDB extends Record<string, any> {
   savedMappings: Array<Record<string, any>>;
 }
 
-const INDIA_BRANDS = [
-  { name: "Apex Furniture Studio", domain: "apexfurniture.in", niche: "Home & Furniture", city: "Delhi", fact: "Shopify storefront with 140+ solid wood SKUs; mobile product gallery lacks zoom and slow LCP." },
-  { name: "VedaGlow Naturals", domain: "vedaglownaturals.in", niche: "Beauty & Skincare", city: "Mumbai", fact: "Ayurvedic skincare D2C store; checkout flow requires 4 page reloads and lacks sticky cart." },
-  { name: "KalaVastra Handlooms", domain: "kalavastrahandlooms.in", niche: "Fashion & Apparel", city: "Jaipur", fact: "Artisanal ethnic wear catalog; no size guide modal or automated WhatsApp order confirmation." },
-  { name: "VoltEdge Audio India", domain: "voltedgeaudio.in", niche: "Electronics & Gadgets", city: "Bengaluru", fact: "Custom audio accessories store; product bundle upsell missing on cart drawer." },
-  { name: "PranaLeaf Wellness", domain: "pranaleafwellness.in", niche: "Health & Nutrition", city: "Pune", fact: "Herbal tea & supplement brand; no subscription recurring order option." },
-  { name: "UrbanCraft Decor", domain: "urbancraftdecor.in", niche: "Home & Furniture", city: "Gurugram", fact: "Contemporary lighting & decor brand; unoptimized hero PNG images (6.4MB)." },
-  { name: "Zenvy Activewear", domain: "zenvyactive.in", niche: "Fashion & Apparel", city: "Hyderabad", fact: "D2C athleisure brand; search bar returns zero results on common typos." },
-  { name: "Nirmal Spice Co", domain: "nirmalspices.co.in", niche: "Food & Beverage", city: "Kochi", fact: "Single-origin spice exporter; B2B wholesale inquiry form broken on mobile Safari." },
-  { name: "Aether Watch Co", domain: "aetherwatches.in", niche: "Jewelry & Accessories", city: "Ahmedabad", fact: "Minimalist watch brand; product specification tabs do not expand on mobile." },
-  { name: "LoomAura Carpets", domain: "loomauracarpets.in", niche: "Home & Furniture", city: "Varanasi", fact: "Hand-knotted rug store; custom dimension calculator missing from product page." },
-];
-
-const INTL_BRANDS = [
-  { name: "NordicTimber Living", domain: "nordictimberliving.com", country: "USA", niche: "Home & Furniture", fact: "Custom oak furniture retailer; lacks 3D room preview and automated quote builder." },
-  { name: "AuraBotanics London", domain: "aurabotanics.co.uk", country: "United Kingdom", niche: "Beauty & Skincare", fact: "Clean beauty brand in UK; quiz funnel lands on static page without product links." },
-  { name: "DesertLuxe Perfumes", domain: "desertluxeperfumes.ae", country: "UAE", niche: "Beauty & Skincare", fact: "Dubai niche fragrance house; bilingual Arabic/English switcher resets cart items." },
-  { name: "MaplePeak Gear", domain: "maplepeakgear.ca", country: "Canada", niche: "Outdoor & Sports", fact: "Outdoor camping equipment store; filter sidebar reloads entire page on every click." },
-  { name: "Solstice Swim Sydney", domain: "solsticeswim.com.au", country: "Australia", niche: "Fashion & Apparel", fact: "Sustainable swimwear label; international currency selector does not update shipping threshold." },
-  { name: "KlangWerk Berlin", domain: "klangwerk-audio.de", country: "Germany", niche: "Electronics & Gadgets", fact: "Studio synthesizer & modular gear shop; B2B dealer portal uses plain mailto links." },
-  { name: "VelvetCrumb Roasters", domain: "velvetcrumbcoffee.com", country: "USA", niche: "Food & Beverage", fact: "Specialty coffee roaster; subscription cadence selector hidden below fold." },
-  { name: "HarborLinen Co", domain: "harborlinenco.com", country: "USA", niche: "Home & Furniture", fact: "Organic bedding D2C store; bundle builder requires manual SKU matching." },
-  { name: "KineticPulse Fitness", domain: "kineticpulsefit.co.uk", country: "United Kingdom", niche: "Outdoor & Sports", fact: "Home gym recovery equipment; comparison table overflows horizontally on tablet." },
-  { name: "OasisHome Artisan", domain: "oasishomeartisan.ae", country: "UAE", niche: "Home & Furniture", fact: "Ceramic & tableware boutique; slow third-party tracking scripts delaying interactive state." },
-];
-
-export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspaceDB {
+/**
+ * Builds a 100% clean, zero-dummy-data workspace structure in Local Browser Storage.
+ * Only structural schema configuration (default pipeline stages & collection containers) is initialized.
+ * All data tables (organizations, contacts, tasks, notes, opportunities, references, contentIdeas, importBatches) start empty.
+ */
+export function buildDefaultLocalBrowserDB(): LocalWorkspaceDB {
   const nowIso = new Date().toISOString();
 
   const stages = [
@@ -124,7 +103,7 @@ export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspa
       workspaceId: DEFAULT_WORKSPACE_ID,
       name: "Global E-Commerce Leads",
       slug: "global-e-commerce-leads",
-      description: "Global & India e-commerce brand ledger with site observation & verification tracking",
+      description: "Primary collection for e-commerce lead spreadsheets and storefront audits",
       icon: "ShoppingBag",
       color: "#7958F5",
       recordType: "company",
@@ -138,598 +117,10 @@ export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspa
       updatedAt: nowIso,
       archivedAt: null,
     },
-    {
-      id: "col_india_d2c",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      name: "India D2C Brands",
-      slug: "india-d2c-brands",
-      description: "High-growth Indian direct-to-consumer brands for storefront & checkout optimization",
-      icon: "ShoppingBag",
-      color: "#32B881",
-      recordType: "company",
-      defaultView: "table",
-      defaultPipelineId: DEFAULT_PIPELINE_ID,
-      scoringConfig: DEFAULT_SCORING_CONFIG,
-      isPinned: true,
-      isVisibleInSidebar: true,
-      sortOrder: 2,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      archivedAt: null,
-    },
-    {
-      id: "col_intl_ecommerce",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      name: "International E-Commerce",
-      slug: "international-e-commerce",
-      description: "Global e-commerce prospects across USA, UK, UAE, Canada, Germany, and Australia",
-      icon: "Globe",
-      color: "#659BFA",
-      recordType: "company",
-      defaultView: "table",
-      defaultPipelineId: DEFAULT_PIPELINE_ID,
-      scoringConfig: DEFAULT_SCORING_CONFIG,
-      isPinned: true,
-      isVisibleInSidebar: true,
-      sortOrder: 3,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      archivedAt: null,
-    },
-    {
-      id: "col_schools_education",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      name: "Schools & Education",
-      slug: "schools-and-education",
-      description: "Private schools, coaching institutes, and EdTech portals for web & admission automation",
-      icon: "GraduationCap",
-      color: "#E9AE50",
-      recordType: "company",
-      defaultView: "table",
-      defaultPipelineId: DEFAULT_PIPELINE_ID,
-      scoringConfig: DEFAULT_SCORING_CONFIG,
-      isPinned: false,
-      isVisibleInSidebar: true,
-      sortOrder: 4,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      archivedAt: null,
-    },
-    {
-      id: "col_ai_automation",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      name: "AI Automation Prospects",
-      slug: "ai-automation-prospects",
-      description: "Businesses suited for custom AI customer support agents, lead triage, and internal workflows",
-      icon: "Bot",
-      color: "#A855F7",
-      recordType: "company",
-      defaultView: "kanban",
-      defaultPipelineId: DEFAULT_PIPELINE_ID,
-      scoringConfig: DEFAULT_SCORING_CONFIG,
-      isPinned: false,
-      isVisibleInSidebar: true,
-      sortOrder: 5,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-      archivedAt: null,
-    },
   ];
-
-  const categories = [
-    { id: "cat_ecom_fashion", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Fashion & Apparel", color: "#7958F5", sortOrder: 1, createdAt: nowIso },
-    { id: "cat_ecom_beauty", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Beauty & Skincare", color: "#EC4899", sortOrder: 2, createdAt: nowIso },
-    { id: "cat_ecom_electronics", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Electronics & Gadgets", color: "#659BFA", sortOrder: 3, createdAt: nowIso },
-    { id: "cat_ecom_homedecor", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Home & Furniture", color: "#E9AE50", sortOrder: 4, createdAt: nowIso },
-    { id: "cat_ecom_d2c", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "D2C Brand", color: "#32B881", sortOrder: 5, createdAt: nowIso },
-    { id: "cat_ecom_wholesale", workspaceId: DEFAULT_WORKSPACE_ID, collectionId: GLOBAL_ECOM_COLLECTION_ID, name: "Wholesale / B2B", color: "#94A3B8", sortOrder: 6, createdAt: nowIso },
-  ];
-
-  const tags = [
-    { id: "tag_high_op", workspaceId: DEFAULT_WORKSPACE_ID, name: "High Website Opportunity", color: "#32B881", createdAt: nowIso },
-    { id: "tag_needs_redesign", workspaceId: DEFAULT_WORKSPACE_ID, name: "Needs Redesign", color: "#7958F5", createdAt: nowIso },
-    { id: "tag_ai_candidate", workspaceId: DEFAULT_WORKSPACE_ID, name: "AI Chatbot Candidate", color: "#659BFA", createdAt: nowIso },
-    { id: "tag_good_reel", workspaceId: DEFAULT_WORKSPACE_ID, name: "Good Reel Example", color: "#E9AE50", createdAt: nowIso },
-    { id: "tag_verify_domain", workspaceId: DEFAULT_WORKSPACE_ID, name: "Verify Official Domain", color: "#E56B73", createdAt: nowIso },
-  ];
-
-  const fieldDefinitions = [
-    {
-      id: "fld_ecom_platform",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      collectionId: GLOBAL_ECOM_COLLECTION_ID,
-      name: "Storefront Platform",
-      key: "storefront_platform",
-      fieldType: "single_select",
-      description: "Detected e-commerce engine",
-      defaultValue: "Shopify",
-      isRequired: false,
-      isVisible: true,
-      sortOrder: 1,
-      options: ["Shopify", "WooCommerce", "Magento", "Custom Stack", "Unknown"],
-      createdAt: nowIso,
-      archivedAt: null,
-    },
-    {
-      id: "fld_ecom_speed",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      collectionId: GLOBAL_ECOM_COLLECTION_ID,
-      name: "Website Speed Issue",
-      key: "website_speed_issue",
-      fieldType: "boolean",
-      description: "Whether slow mobile page speed was observed",
-      defaultValue: null,
-      isRequired: false,
-      isVisible: true,
-      sortOrder: 2,
-      options: [],
-      createdAt: nowIso,
-      archivedAt: null,
-    },
-    {
-      id: "fld_edu_student_count",
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      collectionId: "col_schools_education",
-      name: "Student Count",
-      key: "student_count",
-      fieldType: "number",
-      description: "Estimated student enrollment",
-      defaultValue: null,
-      isRequired: false,
-      isVisible: true,
-      sortOrder: 1,
-      options: [],
-      createdAt: nowIso,
-      archivedAt: null,
-    },
-  ];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const organizations: Array<Record<string, any>> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const memberships: Array<Record<string, any>> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sourceRecords: Array<Record<string, any>> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const warningsSummary: Array<Record<string, any>> = [];
-  const createdOrganizationIds: string[] = [];
-
-  const batchId = "imp_initial_ledger_2026";
-
-  if (include200Leads) {
-    const directoryOnlyIndices = new Set([14, 38, 67, 92, 118, 143, 171, 195]);
-
-    for (let i = 1; i <= 200; i++) {
-      const isIndia = i <= 100;
-      const isDirectoryOnly = directoryOnlyIndices.has(i);
-
-      let leadId: string;
-      let market: string;
-      let country: string;
-      let city: string | null = null;
-      let businessName: string;
-      let niche: string;
-      let website: string;
-      let observedFact: string;
-      let sourceUrl: string;
-      let publishedContact: string;
-      let contactEvidenceUrl: string;
-      let verificationLevel: string;
-      let sourceNote: string;
-
-      if (isIndia) {
-        const seed = INDIA_BRANDS[(i - 1) % INDIA_BRANDS.length];
-        const suffix = i <= 10 ? "" : ` ${Math.ceil(i / 10)}`;
-        const slugNum = i <= 10 ? "" : `-${i}`;
-        leadId = `ECOM-IN-${String(i).padStart(3, "0")}`;
-        market = "India";
-        country = "India";
-        city = seed.city;
-        businessName = `${seed.name}${suffix}`;
-        niche = seed.niche;
-        const domain = seed.domain.replace(".in", `${slugNum}.in`).replace(".co.in", `${slugNum}.co.in`);
-        website = isDirectoryOnly ? "" : `https://${domain}`;
-        observedFact = isDirectoryOnly
-          ? "Listed in D2C directory; official standalone storefront domain not yet verified."
-          : seed.fact;
-        sourceUrl = isDirectoryOnly
-          ? `https://indiad2cdirectory.example.com/brands/${i}`
-          : `https://${domain}/collections/all`;
-        publishedContact = isDirectoryOnly ? "" : `contact@${domain}`;
-        contactEvidenceUrl = isDirectoryOnly ? "" : `https://${domain}/pages/contact`;
-        verificationLevel = isDirectoryOnly ? "directory listing only" : "site description";
-        sourceNote = isDirectoryOnly
-          ? "Directory-only record requiring manual domain verification before qualification."
-          : `India e-commerce prospect (${seed.city}) identified for web & conversion audit.`;
-      } else {
-        const intlIdx = i - 100;
-        const seed = INTL_BRANDS[(intlIdx - 1) % INTL_BRANDS.length];
-        const suffix = intlIdx <= 10 ? "" : ` ${Math.ceil(intlIdx / 10)}`;
-        const slugNum = intlIdx <= 10 ? "" : `-${intlIdx}`;
-        leadId = `ECOM-INTL-${String(intlIdx).padStart(3, "0")}`;
-        market = "International";
-        country = seed.country;
-        businessName = `${seed.name}${suffix}`;
-        niche = seed.niche;
-        const dotIdx = seed.domain.indexOf(".");
-        const domain = `${seed.domain.slice(0, dotIdx)}${slugNum}${seed.domain.slice(dotIdx)}`;
-        website = isDirectoryOnly ? "" : `https://${domain}`;
-        observedFact = isDirectoryOnly
-          ? "Found in international retail trade directory; primary storefront URL unresolved."
-          : seed.fact;
-        sourceUrl = isDirectoryOnly
-          ? `https://globalretailindex.example.org/entry/${intlIdx}`
-          : `https://${domain}/about`;
-        publishedContact = isDirectoryOnly ? "" : `hello@${domain}`;
-        contactEvidenceUrl = isDirectoryOnly ? "" : `https://${domain}/contact`;
-        verificationLevel = isDirectoryOnly ? "directory listing only" : "site description";
-        sourceNote = isDirectoryOnly
-          ? "International directory-only entry; verify official domain before scoring."
-          : `International e-commerce brand (${seed.country}) candidate for storefront & AI automation.`;
-      }
-
-      if (i === 49) {
-        contactEvidenceUrl = "49";
-      } else if (i === 112) {
-        contactEvidenceUrl = "sent";
-      }
-
-      const discoveryDay = String(((i - 1) % 28) + 1).padStart(2, "0");
-      const discoveryDate = `2026-09-${discoveryDay}`;
-
-      const evidenceCheck = validateUrlField(contactEvidenceUrl, "Contact Evidence URL");
-      const normDomain = website ? normalizeDomain(website) : null;
-      const orgId = `org_${leadId.toLowerCase().replace(/[^a-z0-9]/g, "_")}`;
-      createdOrganizationIds.push(orgId);
-
-      if (!evidenceCheck.isValid && evidenceCheck.warning) {
-        warningsSummary.push({
-          rowNumber: i + 1,
-          externalId: leadId,
-          business: businessName,
-          field: "Contact Evidence URL",
-          value: contactEvidenceUrl,
-          message: evidenceCheck.warning,
-        });
-      }
-      if (isDirectoryOnly) {
-        warningsSummary.push({
-          rowNumber: i + 1,
-          externalId: leadId,
-          business: businessName,
-          field: "Verification Level",
-          value: verificationLevel,
-          message: "Directory listing only — requires manual website verification before outreach.",
-        });
-      }
-
-      const orgTags: string[] = [];
-      if (isDirectoryOnly) orgTags.push("Verify Official Domain");
-      if (!evidenceCheck.isValid) orgTags.push("Flagged Contact Evidence");
-
-      organizations.push({
-        id: orgId,
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        externalId: leadId,
-        discoveryDate,
-        name: businessName,
-        normalizedName: normalizeOrganizationName(businessName),
-        websiteUrl: website || null,
-        normalizedDomain: normDomain,
-        market,
-        country,
-        city,
-        industry: niche,
-        description: observedFact,
-        observedFacts: observedFact,
-        sourceUrl: sourceUrl || null,
-        publishedContact: publishedContact || null,
-        contactEvidenceUrl: contactEvidenceUrl || null,
-        contactEvidenceValid: evidenceCheck.isValid,
-        contactEvidenceWarning: evidenceCheck.warning,
-        sourceLeadStatus: "candidate",
-        qualificationDecision: "not reviewed",
-        outreachApproval: "not approved",
-        optOutStatus: "unknown",
-        priorContactCheck: "no prior contact",
-        verificationLevel,
-        sourceNotes: sourceNote,
-        primaryPipelineId: DEFAULT_PIPELINE_ID,
-        primaryStageId: "stg_new",
-        categories: [niche],
-        tags: orgTags,
-        customValues: {
-          storefront_platform: isDirectoryOnly ? "Unknown" : "Shopify",
-          website_speed_issue: !isDirectoryOnly && i % 3 === 0,
-        },
-        score: null,
-        scoreIsManual: false,
-        scoreMethod: "unscored",
-        scoreBreakdown: {},
-        scoreUpdatedAt: null,
-        nextAction: isDirectoryOnly ? "Verify official storefront URL" : "Review storefront & calculate score",
-        nextFollowUpAt: null,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        archivedAt: null,
-      });
-
-      // Membership in Global E-Commerce Leads
-      memberships.push({
-        id: `mem_global_${i}`,
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        collectionId: GLOBAL_ECOM_COLLECTION_ID,
-        organizationId: orgId,
-        collectionCategories: [niche],
-        stageId: "stg_new",
-        score: null,
-        scoreIsManual: false,
-        scoreBreakdown: {},
-        customValues: {},
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      });
-
-      // Also add to India D2C or International E-Commerce collection
-      const secondaryCollectionId = isIndia ? "col_india_d2c" : "col_intl_ecommerce";
-      memberships.push({
-        id: `mem_market_${i}`,
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        collectionId: secondaryCollectionId,
-        organizationId: orgId,
-        collectionCategories: [niche],
-        stageId: "stg_new",
-        score: null,
-        scoreIsManual: false,
-        scoreBreakdown: {},
-        customValues: {},
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      });
-
-      sourceRecords.push({
-        id: `src_row_${i}`,
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        importBatchId: batchId,
-        organizationId: orgId,
-        sourceFilename: LEDGER_FILENAME,
-        sheetName: "Leads",
-        rowNumber: i + 1,
-        externalId: leadId,
-        rawValues: {
-          "Lead ID": leadId,
-          "Discovery Date": discoveryDate,
-          Market: market,
-          Country: country,
-          Business: businessName,
-          Niche: niche,
-          "Official Website": website,
-          "Observed Fact (from site)": observedFact,
-          "Source URL": sourceUrl,
-          "Published Business Contact": publishedContact,
-          "Contact Evidence URL": contactEvidenceUrl,
-          Status: "candidate",
-          "Qualification Decision": "not reviewed",
-          "Outreach Approval": "not approved",
-          "Opt-Out": "unknown",
-          "Prior Contact Check": "no prior contact",
-          "Verification Level": verificationLevel,
-          Notes: sourceNote,
-        },
-        validationWarnings: !evidenceCheck.isValid && evidenceCheck.warning ? [evidenceCheck.warning] : [],
-        importedAt: nowIso,
-      });
-    }
-  }
-
-  const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-
-  const tasks = include200Leads
-    ? [
-        {
-          id: "tsk_local_1",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "Audit Apex Furniture Studio mobile product gallery & LCP speed",
-          description: "Prepare 3-point UX & speed observation before qualifying lead.",
-          taskType: "Send Website Audit",
-          organizationId: "org_ecom_in_001",
-          opportunityId: null,
-          contactId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          priority: "high",
-          status: "To Do",
-          dueDate: today,
-          dueTime: "14:00",
-          reminderSetting: "day_of",
-          notes: "Observed 140+ solid wood SKUs on Shopify without image zoom.",
-          completedAt: null,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        },
-        {
-          id: "tsk_local_2",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "Verify Contact Evidence URL anomaly ('49') on ECOM-IN-049",
-          description: "Inspect contact page manually and replace raw numeric cell value.",
-          taskType: "Review Website",
-          organizationId: "org_ecom_in_049",
-          opportunityId: null,
-          contactId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          priority: "high",
-          status: "To Do",
-          dueDate: yesterday,
-          dueTime: "11:00",
-          reminderSetting: "day_of",
-          notes: "Flagged automatically during Global E-Commerce Lead Ledger import.",
-          completedAt: null,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        },
-        {
-          id: "tsk_local_3",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "Verify Contact Evidence URL anomaly ('sent') on ECOM-INTL-012",
-          description: "Confirm no outreach was sent and locate official contact page URL.",
-          taskType: "Review Website",
-          organizationId: "org_ecom_intl_012",
-          opportunityId: null,
-          contactId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          priority: "medium",
-          status: "To Do",
-          dueDate: tomorrow,
-          dueTime: "16:00",
-          reminderSetting: "day_of",
-          notes: "Preserved raw 'sent' string without reclassifying lead as Contacted.",
-          completedAt: null,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        },
-      ]
-    : [];
-
-  const references = include200Leads
-    ? [
-        {
-          id: "ref_local_1",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "Apex Furniture Studio — Product Gallery & Checkout UX Reference",
-          url: "https://apexfurniture.in",
-          description: "High-ticket furniture catalog needing 3D preview & sticky mobile cart.",
-          category: "Redesign Opportunity",
-          tags: ["Shopify", "Home & Furniture", "Mobile UX"],
-          screenshotUrl: null,
-          notes: "Great candidate for custom Next.js headless storefront or theme speed overhaul.",
-          organizationId: "org_ecom_in_001",
-          opportunityId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          createdAt: nowIso,
-        },
-        {
-          id: "ref_local_2",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "AuraBotanics London — Skincare Quiz Funnel Breakdown",
-          url: "https://aurabotanics.co.uk",
-          description: "Clean beauty quiz funnel that drops users on a static page instead of dynamic bundle cart.",
-          category: "AI Automation Opportunity",
-          tags: ["AI Concierge", "Beauty & Skincare", "UK"],
-          screenshotUrl: null,
-          notes: "Strong use case for AI skincare advisor + instant cart bundle builder.",
-          organizationId: "org_ecom_intl_002",
-          opportunityId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          createdAt: nowIso,
-        },
-      ]
-    : [];
-
-  const contentIdeas = include200Leads
-    ? [
-        {
-          id: "cid_local_1",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          title: "Why D2C Furniture Stores Lose Mobile Buyers at the Gallery Step",
-          hook: "If you sell ₹45,000 solid wood furniture online, a non-zoomable mobile gallery kills trust.",
-          description: "Breakdown of mobile LCP, image zoom, and dimension calculator UX for Indian furniture brands.",
-          platform: "Instagram Reels",
-          contentType: "Website Audit / Breakdown",
-          organizationId: "org_ecom_in_001",
-          referenceId: "ref_local_1",
-          category: "Good Reel",
-          priority: "high",
-          status: "Scripted",
-          notes: "Derived from Apex Furniture Studio observation in Global E-Commerce Lead Ledger.",
-          targetPublicationDate: tomorrow,
-          publishedUrl: null,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        },
-      ]
-    : [];
-
-  const importBatches = include200Leads
-    ? [
-        {
-          id: batchId,
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          filename: LEDGER_FILENAME,
-          fileFormat: "xlsx",
-          selectedSheet: "Leads",
-          totalRowsRead: 200,
-          newRecordsCreated: 200,
-          existingMatched: 0,
-          recordsUpdated: 0,
-          duplicatesSkipped: 0,
-          rowsRequiringReview: 10,
-          failedRowsCount: 0,
-          duplicatePolicy: "fill_blanks",
-          mappingConfig: {
-            "Lead ID": "externalId",
-            "Discovery Date": "discoveryDate",
-            Market: "market",
-            Country: "country",
-            Business: "name",
-            Niche: "industry",
-            "Official Website": "websiteUrl",
-            "Observed Fact (from site)": "observedFacts",
-            "Source URL": "sourceUrl",
-            "Published Business Contact": "publishedContact",
-            "Contact Evidence URL": "contactEvidenceUrl",
-            Status: "sourceLeadStatus",
-            "Qualification Decision": "qualificationDecision",
-            "Outreach Approval": "outreachApproval",
-            "Opt-Out": "optOutStatus",
-            "Prior Contact Check": "priorContactCheck",
-            "Verification Level": "verificationLevel",
-            Notes: "sourceNotes",
-          },
-          warningsSummary,
-          runLogProvenance: [
-            {
-              "Run Date": "2026-09-30",
-              "India Candidates": 100,
-              "International Candidates": 100,
-              "Total Candidates": 200,
-              "Official Website Observed": 192,
-              "Directory-Only Unresolved": 8,
-              "Duplicate Domains Within Run": 0,
-              "Cross-Run Duplicate Check": "Passed (0 cross-run collisions)",
-              "Messages Sent": 0,
-              "Qualification Status": "All 200 marked not reviewed / not approved",
-            },
-          ],
-          createdOrganizationIds,
-          status: "completed",
-          createdAt: nowIso,
-        },
-      ]
-    : [];
-
-  const activities = include200Leads
-    ? [
-        {
-          id: "act_local_init",
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          organizationId: null,
-          opportunityId: null,
-          contactId: null,
-          collectionId: GLOBAL_ECOM_COLLECTION_ID,
-          actorOrigin: "import",
-          activityType: "lead_imported",
-          title: `200 leads initialized in Local Browser Storage from ${LEDGER_FILENAME}`,
-          description: "100 India + 100 International leads (192 site description, 8 directory listing only; '49' and 'sent' anomalies flagged).",
-          metadata: { batchId, newRecordsCreated: 200 },
-          createdAt: nowIso,
-        },
-      ]
-    : [];
 
   return {
-    version: 1,
+    version: 2,
     lastSavedAt: nowIso,
     workspace: {
       id: DEFAULT_WORKSPACE_ID,
@@ -744,9 +135,9 @@ export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspa
       updatedAt: nowIso,
     },
     collections,
-    categories,
-    tags,
-    fieldDefinitions,
+    categories: [],
+    tags: [],
+    fieldDefinitions: [],
     pipelines: [
       {
         id: DEFAULT_PIPELINE_ID,
@@ -758,18 +149,18 @@ export function buildDefaultLocalBrowserDB(include200Leads = true): LocalWorkspa
       },
     ],
     pipelineStages: stages,
-    organizations,
-    memberships,
+    organizations: [],
+    memberships: [],
     opportunities: [],
     contacts: [],
-    tasks,
+    tasks: [],
     notes: [],
-    activities,
+    activities: [],
     attachments: [],
-    references,
-    contentIdeas,
-    importBatches,
-    sourceRecords,
+    references: [],
+    contentIdeas: [],
+    importBatches: [],
+    sourceRecords: [],
     stageHistory: [],
     suppressions: [],
     savedViews: [],
@@ -799,9 +190,14 @@ function saveToIndexedDB(dbState: LocalWorkspaceDB): void {
 
 export function loadLocalBrowserDB(): LocalWorkspaceDB {
   if (typeof window === "undefined") {
-    return buildDefaultLocalBrowserDB(true);
+    return buildDefaultLocalBrowserDB();
   }
   try {
+    // Purge legacy v1 storage that contained pre-seeded dummy leads
+    if (window.localStorage.getItem(LEGACY_DUMMY_STORAGE_KEY)) {
+      window.localStorage.removeItem(LEGACY_DUMMY_STORAGE_KEY);
+    }
+
     const raw = window.localStorage.getItem(LOCAL_STORAGE_DB_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as LocalWorkspaceDB;
@@ -810,10 +206,10 @@ export function loadLocalBrowserDB(): LocalWorkspaceDB {
       }
     }
   } catch (err) {
-    console.warn("Failed to parse localStorage DB, initializing fresh state:", err);
+    console.warn("Failed to parse localStorage DB, initializing clean state:", err);
   }
 
-  const initial = buildDefaultLocalBrowserDB(true);
+  const initial = buildDefaultLocalBrowserDB();
   saveLocalBrowserDB(initial);
   return initial;
 }
@@ -840,16 +236,16 @@ export function getLocalBrowserStorageStats(): {
 } {
   if (typeof window === "undefined") {
     return {
-      leadCount: 200,
-      collectionCount: 5,
-      taskCount: 3,
+      leadCount: 0,
+      collectionCount: 1,
+      taskCount: 0,
       opportunityCount: 0,
       sizeKB: 0,
       lastSavedAt: new Date().toISOString(),
     };
   }
   const raw = window.localStorage.getItem(LOCAL_STORAGE_DB_KEY) || "";
-  const sizeKB = Math.round((raw.length * 2) / 1024);
+  const sizeKB = Math.max(1, Math.round((raw.length * 2) / 1024));
   const state = loadLocalBrowserDB();
   return {
     leadCount: state.organizations.filter((o) => !o.archivedAt).length,
@@ -1461,72 +857,6 @@ function previewLocalSpreadsheetImport(
 // BROWSER FETCH INTERCEPTOR FOR 100% LOCAL BROWSER STORAGE OPERATION
 // ============================================================================
 let interceptorInstalled = false;
-let cachedFixtureBuffer: ArrayBuffer | null = null;
-
-async function getBrowserLedgerFixtureBuffer(): Promise<ArrayBuffer> {
-  if (cachedFixtureBuffer) return cachedFixtureBuffer;
-  const workbook = new ExcelJS.Workbook();
-  const tempState = buildDefaultLocalBrowserDB(true);
-  const wsLeads = workbook.addWorksheet("Leads");
-  const headers = [
-    "Lead ID",
-    "Discovery Date",
-    "Market",
-    "Country",
-    "Business",
-    "Niche",
-    "Official Website",
-    "Observed Fact (from site)",
-    "Source URL",
-    "Published Business Contact",
-    "Contact Evidence URL",
-    "Status",
-    "Qualification Decision",
-    "Outreach Approval",
-    "Opt-Out",
-    "Prior Contact Check",
-    "Verification Level",
-    "Notes",
-  ];
-  wsLeads.addRow(headers);
-  for (const sr of tempState.sourceRecords) {
-    const rv = sr.rawValues || {};
-    wsLeads.addRow(headers.map((h) => rv[h] ?? ""));
-  }
-  const wsRunLog = workbook.addWorksheet("Run Log");
-  wsRunLog.addRow([
-    "Run Date",
-    "India Candidates",
-    "International Candidates",
-    "Total Candidates",
-    "Official Website Observed",
-    "Directory-Only Unresolved",
-    "Messages Sent",
-    "Qualification Status",
-  ]);
-  wsRunLog.addRow([
-    "2026-09-30",
-    100,
-    100,
-    200,
-    192,
-    8,
-    0,
-    "All 200 marked not reviewed / not approved",
-  ]);
-  const wsDnc = workbook.addWorksheet("Do Not Contact");
-  wsDnc.addRow([
-    "Business / Domain",
-    "Contact / Channel",
-    "Opt-Out Date",
-    "Reason / Source",
-    "Do Not Contact Status",
-    "Notes",
-  ]);
-  const buf = await workbook.xlsx.writeBuffer();
-  cachedFixtureBuffer = buf;
-  return buf;
-}
 
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -1539,7 +869,7 @@ export function installLocalBrowserStorageInterceptor(): void {
   if (typeof window === "undefined" || interceptorInstalled) return;
   interceptorInstalled = true;
 
-  // Ensure Local Browser Storage is initialized on startup
+  // Ensure Local Browser Storage is initialized on startup (with zero dummy data)
   loadLocalBrowserDB();
 
   const nativeFetch = window.fetch.bind(window);
@@ -1739,7 +1069,9 @@ export function installLocalBrowserStorageInterceptor(): void {
             const colIds =
               Array.isArray(updates.collectionIds) && updates.collectionIds.length > 0
                 ? updates.collectionIds
-                : [GLOBAL_ECOM_COLLECTION_ID];
+                : state.collections[0]
+                ? [state.collections[0].id]
+                : [];
             for (const colId of colIds) {
               state.memberships.push({
                 id: uid("mem"),
@@ -2416,23 +1748,17 @@ export function installLocalBrowserStorageInterceptor(): void {
           }
 
           case "reset_to_empty_workspace": {
-            const emptyState = buildDefaultLocalBrowserDB(false);
+            const emptyState = buildDefaultLocalBrowserDB();
             saveLocalBrowserDB(emptyState);
             return jsonResponse({ ok: true });
-          }
-
-          case "reseed_workspace": {
-            const seededState = buildDefaultLocalBrowserDB(true);
-            saveLocalBrowserDB(seededState);
-            return jsonResponse({ ok: true, seeded: true, leadCount: 200 });
           }
 
           case "restore_json_backup": {
             if (payload.backupData && Array.isArray(payload.backupData.organizations)) {
               const nextState: LocalWorkspaceDB = {
-                ...buildDefaultLocalBrowserDB(false),
+                ...buildDefaultLocalBrowserDB(),
                 ...payload.backupData,
-                version: 1,
+                version: 2,
                 lastSavedAt: nowIso,
               };
               saveLocalBrowserDB(nextState);
@@ -2452,10 +1778,10 @@ export function installLocalBrowserStorageInterceptor(): void {
       try {
         const state = loadLocalBrowserDB();
         let mode = "inspect";
-        let filename = LEDGER_FILENAME;
+        let filename = "spreadsheet.xlsx";
         let arrayBuffer: ArrayBuffer | null = null;
         let selectedSheet = "Leads";
-        let collectionId = GLOBAL_ECOM_COLLECTION_ID;
+        let collectionId = state.collections[0]?.id || GLOBAL_ECOM_COLLECTION_ID;
         let mapping: Record<string, string> = {};
         let duplicatePolicy = "fill_blanks";
         let batchId: string | undefined;
@@ -2464,11 +1790,7 @@ export function installLocalBrowserStorageInterceptor(): void {
           const formData = init.body;
           mode = String(formData.get("mode") || "inspect");
           const file = formData.get("file") as File | null;
-          const useFixture = formData.get("useFixture") === "true";
-          if (useFixture) {
-            arrayBuffer = await getBrowserLedgerFixtureBuffer();
-            filename = LEDGER_FILENAME;
-          } else if (file) {
+          if (file) {
             filename = file.name;
             arrayBuffer = await file.arrayBuffer();
           }
@@ -2480,15 +1802,12 @@ export function installLocalBrowserStorageInterceptor(): void {
           const body = JSON.parse(String(init.body));
           mode = body.mode || "inspect";
           selectedSheet = body.selectedSheet || "Leads";
-          collectionId = body.collectionId || GLOBAL_ECOM_COLLECTION_ID;
+          collectionId = body.collectionId || state.collections[0]?.id || GLOBAL_ECOM_COLLECTION_ID;
           mapping = body.mapping || {};
           duplicatePolicy = body.duplicatePolicy || "fill_blanks";
           batchId = body.batchId;
 
-          if (body.useFixture) {
-            arrayBuffer = await getBrowserLedgerFixtureBuffer();
-            filename = LEDGER_FILENAME;
-          } else if (body.fileBase64 && body.filename) {
+          if (body.fileBase64 && body.filename) {
             filename = String(body.filename);
             const binary = window.atob(String(body.fileBase64));
             const bytes = new Uint8Array(binary.length);
@@ -2530,7 +1849,7 @@ export function installLocalBrowserStorageInterceptor(): void {
         }
 
         if (!arrayBuffer) {
-          return jsonResponse({ error: "No spreadsheet file provided." }, 400);
+          return jsonResponse({ error: "Please choose an .xlsx or .csv file from your device." }, 400);
         }
 
         const { inspection, sheetRowsMap } = await parseBrowserSpreadsheet(arrayBuffer, filename);
@@ -2597,7 +1916,6 @@ export function installLocalBrowserStorageInterceptor(): void {
                   existingOrg.observedFacts = m.observedFacts || existingOrg.observedFacts;
                   existingOrg.publishedContact = m.publishedContact || existingOrg.publishedContact;
                 } else {
-                  // fill_blanks
                   if (!existingOrg.industry && m.industry) existingOrg.industry = m.industry;
                   if (!existingOrg.observedFacts && m.observedFacts)
                     existingOrg.observedFacts = m.observedFacts;
@@ -2702,17 +2020,20 @@ export function installLocalBrowserStorageInterceptor(): void {
             filename,
             fileFormat: filename.toLowerCase().endsWith(".csv") ? "csv" : "xlsx",
             selectedSheet,
+            totalRows: preview.totalRows,
             totalRowsRead: preview.totalRows,
             newRecordsCreated,
             existingMatched,
             recordsUpdated,
             duplicatesSkipped,
             rowsRequiringReview: warningsSummary.length,
+            validationWarningsCount: warningsSummary.length,
             failedRowsCount: preview.invalidCount,
             duplicatePolicy,
             mappingConfig: mapping,
             warningsSummary,
             runLogProvenance: preview.runLogRows,
+            suppressionRowsCount: preview.suppressionRows?.length || 0,
             createdOrganizationIds,
             status: "completed",
             createdAt: nowIso,
@@ -2725,7 +2046,7 @@ export function installLocalBrowserStorageInterceptor(): void {
             collectionId,
             actorOrigin: "import",
             activityType: "lead_imported",
-            title: `${newRecordsCreated} new leads imported (${existingMatched} matched) into Local Browser Storage`,
+            title: `${newRecordsCreated} new leads imported (${existingMatched} matched) from ${filename}`,
             createdAt: nowIso,
           });
           saveLocalBrowserDB(state);
