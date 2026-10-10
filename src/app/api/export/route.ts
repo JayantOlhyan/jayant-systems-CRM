@@ -4,7 +4,6 @@ import { getDb, DEFAULT_WORKSPACE_ID } from "@/db";
 import { importBatches } from "@/db/schema";
 import { queryLeadsPaginated, getFullWorkspaceData } from "@/lib/crm-service";
 import { sanitizeSpreadsheetCell } from "@/lib/domain-utils";
-import { generateLedgerWorkbookBuffer, LEDGER_FILENAME } from "@/lib/ledger-fixture";
 
 function toCsvLine(cells: unknown[]): string {
   return cells
@@ -26,17 +25,6 @@ export async function GET(req: NextRequest) {
     const market = searchParams.get("market") || undefined;
     const idsParam = searchParams.get("ids") || undefined;
     const batchId = searchParams.get("batchId") || undefined;
-
-    if (format === "ledger_fixture") {
-      const buf = await generateLedgerWorkbookBuffer();
-      return new NextResponse(new Uint8Array(buf), {
-        headers: {
-          "Content-Type":
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="Global-E-Commerce-Lead-Ledger-2026.xlsx"`,
-        },
-      });
-    }
 
     if (format === "import_warnings" && batchId) {
       const db = await getDb();
