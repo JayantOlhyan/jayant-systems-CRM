@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search,
-  Filter,
   Plus,
   Download,
+  Upload,
   Table as TableIcon,
   Columns,
   LayoutGrid,
@@ -20,8 +20,12 @@ import {
   Bookmark,
   SlidersHorizontal,
   Archive,
-  Tag,
-  FolderKanban,
+  Send,
+  Mail,
+  Heart,
+  X,
+  Sparkles,
+  MessageSquare,
 } from "lucide-react";
 import { triggerLocalBrowserFileDownload } from "@/lib/browser-storage";
 
@@ -45,7 +49,6 @@ export function LeadsDatabaseView({
   collectionId,
   collections,
   stages,
-  categories,
   savedViews,
   onOpenLead,
   onOpenQuickAdd,
@@ -53,8 +56,12 @@ export function LeadsDatabaseView({
   notify,
 }: LeadsDatabaseViewProps) {
   const activeCol = collections.find((c) => c.id === collectionId);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [viewMode, setViewMode] = useState<"table" | "kanban" | "cards" | "map">("table");
+  const [viewMode, setViewMode] = useState<"table" | "swipe" | "cards" | "kanban" | "map">("table");
+  const [swipeIndex, setSwipeIndex] = useState(0);
+  const [importingFile, setImportingFile] = useState(false);
+
   const [search, setSearch] = useState("");
   const [marketFilter, setMarketFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
@@ -90,6 +97,7 @@ export function LeadsDatabaseView({
     qualification: true,
     outreach: true,
     nextAction: true,
+    quickActions: true,
   });
 
   const fetchLeads = useCallback(async () => {
@@ -142,6 +150,131 @@ export function LeadsDatabaseView({
   useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
+
+  useEffect(() => {
+    setSwipeIndex(0);
+  }, [rows.length, collectionId, search, marketFilter]);
+
+  async function handleDirectFileImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append("mode", "quick_import");
+      formData.append("file", file);
+      if (collectionId) {
+        formData.append("collectionId", collectionId);
+      } else if (collections[0]?.id) {
+        formData.append("collectionId", collections[0].id);
+      }
+      const res = await fetch("/api/import", {
+        method: "POST",
+        body: formData,
+      });
+      const json = await res.json();
+      if (res.ok && json.batch) {
+        await fetchLeads();
+        await onMutated();
+        notify(
+          `Imported ${json.batch.newRecordsCreated} new leads (${json.batch.existingMatched} matched) from ${file.name}`,
+          "success"
+        );
+      } else {
+        notify(json.error || "Could not import spreadsheet", "error");
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Spreadsheet import failed", "error");
+    } finally {
+      setImportingFile(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleToggleBookmark(orgId: string, orgName: string, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "toggle_bookmark_inspiration",
+        payload: { organizationId: orgId },
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      await fetchLeads();
+      await onMutated();
+      notify(
+        data.isBookmarked
+          ? `Bookmarked ${orgName} website to Design Inspirations`
+          : `Removed ${orgName} from Design Inspirations`,
+        data.isBookmarked ? "success" : "info"
+      );
+    }
+  }
+
+  async function handleQuickMessageStatus(
+    orgId: string,
+    orgName: string,
+    messageStatus: "not_messaged" | "message_sent" | "followup_sent" | "replied",
+    channel = "Outreach",
+    e?: React.MouseEvent
+  ) {
+    if (e) e.stopPropagation();
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "record_message_operation",
+        payload: { organizationId: orgId, messageStatus, channel },
+      }),
+    });
+    if (res.ok) {
+      await fetchLeads();
+      await onMutated();
+      const mapLabel: Record<string, string> = {
+        not_messaged: `Reset ${orgName} to Not Messaged`,
+        message_sent: `Marked Message Sent to ${orgName}`,
+        followup_sent: `Marked Follow-up Sent to ${orgName}`,
+        replied: `Marked ${orgName} as Replied`,
+      };
+      notify(mapLabel[messageStatus] || "Updated message status", "success");
+    }
+  }
+
+  async function handleSwipeDecision(orgId: string, orgName: string, decision: "pass" | "qualify") {
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "inline_update_lead",
+        payload: {
+          id: orgId,
+          updates:
+            decision === "qualify"
+              ? {
+                  qualificationDecision: "qualified",
+                  outreachApproval: "approved",
+                  primaryStageId: "stg_qualified",
+                }
+              : {
+                  qualificationDecision: "disqualified",
+                  primaryStageId: "stg_lost",
+                },
+        },
+      }),
+    });
+    await fetchLeads();
+    await onMutated();
+    notify(
+      decision === "qualify"
+        ? `Qualified & approved ${orgName}`
+        : `Passed on ${orgName}`,
+      decision === "qualify" ? "success" : "info"
+    );
+    setSwipeIndex((prev) => (prev + 1 < rows.length ? prev + 1 : 0));
+  }
 
   function resetFilters() {
     setSearch("");
@@ -268,9 +401,19 @@ export function LeadsDatabaseView({
     return acc;
   }, {});
 
+  const activeSwipeLead = rows[swipeIndex] || rows[0] || null;
+
   return (
     <div className="space-y-4">
-      {/* Top Header Bar (Matches Mockup 3) */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.csv"
+        onChange={handleDirectFileImport}
+        className="sr-only"
+      />
+
+      {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div
@@ -284,7 +427,7 @@ export function LeadsDatabaseView({
               {activeCol ? activeCol.name : "All Leads Database"}
             </h1>
             <p className="text-xs text-text-secondary font-mono">
-              {totalCount} leads matching current filters • Page {page} of {totalPages}
+              {totalCount} leads matching current filters • Click any lead to open Centered Card
             </p>
           </div>
         </div>
@@ -294,8 +437,9 @@ export function LeadsDatabaseView({
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             {[
               { id: "table", label: "Table", icon: TableIcon },
-              { id: "kanban", label: "Kanban", icon: Columns },
+              { id: "swipe", label: "Swipe Deck", icon: Sparkles },
               { id: "cards", label: "Cards", icon: LayoutGrid },
+              { id: "kanban", label: "Kanban", icon: Columns },
               { id: "map", label: "Map", icon: MapPin },
             ].map((vm) => {
               const Icon = vm.icon;
@@ -316,6 +460,16 @@ export function LeadsDatabaseView({
               );
             })}
           </div>
+
+          <button
+            type="button"
+            disabled={importingFile}
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-surface hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent hover:text-text-primary transition"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            {importingFile ? "Importing..." : "Import .XLSX / .CSV"}
+          </button>
 
           <button
             type="button"
@@ -489,8 +643,8 @@ export function LeadsDatabaseView({
           className="bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
         >
           <option value="">All Verification Levels</option>
-          <option value="site description">Site Description (192)</option>
-          <option value="directory listing only">Directory Listing Only (8)</option>
+          <option value="site description">Site Description</option>
+          <option value="directory listing only">Directory Listing Only</option>
           <option value="manually verified">Manually Verified</option>
         </select>
 
@@ -665,14 +819,278 @@ export function LeadsDatabaseView({
         </div>
       )}
 
-      {/* VIEW 1: SPREADSHEET-LIKE DATA TABLE (Matches Mockup 3 & Mockup 2) */}
+      {/* VIEW 0: TINDER-STYLE CENTERED SWIPE DECK VIEW */}
+      {viewMode === "swipe" && (
+        <div className="py-6 flex flex-col items-center justify-center">
+          {rows.length === 0 ? (
+            <div className="max-w-md w-full bg-app-surface border border-app-border rounded-2xl p-8 text-center space-y-3 shadow-xl">
+              <p className="font-heading font-bold text-base text-text-primary">
+                No Leads in Deck Yet
+              </p>
+              <p className="text-xs text-text-secondary">
+                Import your `.xlsx` or `.csv` spreadsheet or add a lead to start swiping and reviewing cards in the center.
+              </p>
+              <div className="flex justify-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Import .XLSX / .CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenQuickAdd}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  + Add Lead
+                </button>
+              </div>
+            </div>
+          ) : (
+            activeSwipeLead && (
+              <div className="w-full max-w-xl bg-app-surface border border-app-border rounded-2xl shadow-2xl overflow-hidden transition-all">
+                {/* Card Top Banner */}
+                <div className="p-6 bg-gradient-to-br from-app-sidebar via-app-surface to-app-secondary border-b border-app-border space-y-3">
+                  <div className="flex items-center justify-between text-xs font-mono text-text-muted">
+                    <span>
+                      LEAD CARD {swipeIndex + 1} OF {rows.length} •{" "}
+                      {activeSwipeLead.externalId || activeSwipeLead.id.slice(0, 8)}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSwipeIndex((p) => (p - 1 >= 0 ? p - 1 : rows.length - 1))
+                        }
+                        className="p-1 rounded bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
+                        title="Previous Lead"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSwipeIndex((p) => (p + 1 < rows.length ? p + 1 : 0))
+                        }
+                        className="p-1 rounded bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
+                        title="Next Lead"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-14 h-14 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-lg flex items-center justify-center shrink-0">
+                        {activeSwipeLead.name.slice(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <button
+                          type="button"
+                          onClick={() => onOpenLead(activeSwipeLead.id)}
+                          className="text-xl font-heading font-bold text-text-primary hover:text-accent text-left"
+                        >
+                          {activeSwipeLead.name}
+                        </button>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-text-secondary mt-1">
+                          {activeSwipeLead.normalizedDomain ? (
+                            <a
+                              href={
+                                activeSwipeLead.websiteUrl?.startsWith("http")
+                                  ? activeSwipeLead.websiteUrl
+                                  : `https://${activeSwipeLead.websiteUrl}`
+                              }
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-accent hover:underline font-mono"
+                            >
+                              <Globe className="w-3.5 h-3.5" />
+                              {activeSwipeLead.normalizedDomain}
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          ) : (
+                            <span className="text-status-warning font-mono">
+                              Directory-only listing
+                            </span>
+                          )}
+                          <span>•</span>
+                          <span>{activeSwipeLead.country || "Global"}</span>
+                          <span>•</span>
+                          <span className="px-2 py-0.5 rounded bg-accent/15 text-accent font-medium">
+                            {activeSwipeLead.industry || "E-Commerce"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) =>
+                        handleToggleBookmark(activeSwipeLead.id, activeSwipeLead.name, e)
+                      }
+                      title="Bookmark Website to Design Inspirations"
+                      className={`p-2.5 rounded-xl border transition ${
+                        activeSwipeLead.isBookmarked
+                          ? "bg-accent text-white border-accent"
+                          : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      <Bookmark
+                        className={`w-4 h-4 ${
+                          activeSwipeLead.isBookmarked ? "fill-current" : ""
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card Body */}
+                <div className="p-6 space-y-4 text-xs">
+                  <div className="p-3.5 rounded-xl bg-app-secondary border border-app-border space-y-1">
+                    <span className="text-[10px] font-mono uppercase text-text-muted block">
+                      Observed Facts (from Website)
+                    </span>
+                    <p className="text-text-primary leading-relaxed text-sm">
+                      {activeSwipeLead.observedFacts || "No site description recorded yet."}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="p-3 rounded-xl bg-app-secondary border border-app-border">
+                      <span className="text-[10px] font-mono uppercase text-text-muted block">
+                        Published Contact
+                      </span>
+                      <span className="font-mono text-text-primary mt-0.5 block truncate">
+                        {activeSwipeLead.publishedContact || "Not listed"}
+                      </span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-app-secondary border border-app-border">
+                      <span className="text-[10px] font-mono uppercase text-text-muted block">
+                        Verification &amp; Qualification
+                      </span>
+                      <span className="font-mono text-text-primary mt-0.5 block">
+                        {activeSwipeLead.verificationLevel} •{" "}
+                        {activeSwipeLead.qualificationDecision}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Simple Message Operations Block right inside the card */}
+                  <div className="p-3.5 rounded-xl bg-app-secondary border border-app-border space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-[10px] uppercase text-text-muted flex items-center gap-1">
+                        <MessageSquare className="w-3.5 h-3.5 text-accent" />
+                        Simple Message Operations
+                      </span>
+                      {activeSwipeLead.websiteUrl && (
+                        <a
+                          href={
+                            activeSwipeLead.websiteUrl.startsWith("http")
+                              ? activeSwipeLead.websiteUrl
+                              : `https://${activeSwipeLead.websiteUrl}`
+                          }
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-accent hover:underline font-mono text-[11px] inline-flex items-center gap-1"
+                        >
+                          Open Website <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { id: "not_messaged", label: "Not Messaged" },
+                        { id: "message_sent", label: "✓ Message Sent" },
+                        { id: "followup_sent", label: "✓ Follow-up Sent" },
+                        { id: "replied", label: "★ Replied" },
+                      ].map((st) => {
+                        const active =
+                          (activeSwipeLead.messageStatus || "not_messaged") === st.id;
+                        return (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={(e) =>
+                              handleQuickMessageStatus(
+                                activeSwipeLead.id,
+                                activeSwipeLead.name,
+                                st.id as
+                                  | "not_messaged"
+                                  | "message_sent"
+                                  | "followup_sent"
+                                  | "replied",
+                                "Outreach",
+                                e
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+                              active
+                                ? "bg-accent text-white border-accent font-semibold"
+                                : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            {st.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tinder-Style Bottom Action Bar */}
+                <div className="px-6 py-4 bg-app-sidebar border-t border-app-border flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSwipeDecision(activeSwipeLead.id, activeSwipeLead.name, "pass")
+                    }
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-xs font-semibold transition"
+                  >
+                    <X className="w-4 h-4" />
+                    Pass / Skip
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onOpenLead(activeSwipeLead.id)}
+                    className="inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary text-xs font-semibold transition"
+                  >
+                    Open Full Card
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSwipeDecision(
+                        activeSwipeLead.id,
+                        activeSwipeLead.name,
+                        "qualify"
+                      )
+                    }
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-xs font-semibold transition"
+                  >
+                    <Heart className="w-4 h-4 fill-current" />
+                    Qualify &amp; Approve
+                  </button>
+                </div>
+              </div>
+            )
+          )}
+        </div>
+      )}
+
+      {/* VIEW 1: SPREADSHEET-LIKE DATA TABLE */}
       {viewMode === "table" && (
         <div className="bg-app-surface border border-app-border rounded-xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-app-secondary text-text-muted font-mono uppercase text-[11px] border-b border-app-border">
+              <thead className="bg-app-secondary text-text-muted font-sans font-semibold uppercase text-[11px] border-b border-app-border">
                 <tr>
-                  <th className="py-2.5 px-3 w-9">
+                  <th className="py-2 px-3 w-9">
                     <button
                       type="button"
                       onClick={toggleSelectAllOnPage}
@@ -686,51 +1104,62 @@ export function LeadsDatabaseView({
                       )}
                     </button>
                   </th>
-                  <th className="py-2.5 px-3">Company / Organization</th>
-                  {visibleCols.website && <th className="py-2.5 px-3">Website</th>}
-                  {visibleCols.country && <th className="py-2.5 px-3">Country / Market</th>}
-                  {visibleCols.niche && <th className="py-2.5 px-3">Niche / Category</th>}
-                  {visibleCols.verification && <th className="py-2.5 px-3">Verification</th>}
-                  {visibleCols.score && <th className="py-2.5 px-3">Score</th>}
-                  {visibleCols.stage && <th className="py-2.5 px-3">Pipeline Stage</th>}
-                  {visibleCols.qualification && <th className="py-2.5 px-3">Qualification</th>}
-                  {visibleCols.outreach && <th className="py-2.5 px-3">Outreach Approval</th>}
-                  {visibleCols.nextAction && <th className="py-2.5 px-3">Next Action</th>}
+                  <th className="py-2 px-3">Company / Organization</th>
+                  {visibleCols.website && <th className="py-2 px-3">Website</th>}
+                  {visibleCols.country && <th className="py-2 px-3">Country / Market</th>}
+                  {visibleCols.niche && <th className="py-2 px-3">Niche / Category</th>}
+                  {visibleCols.verification && <th className="py-2 px-3">Verification</th>}
+                  {visibleCols.score && <th className="py-2 px-3">Score</th>}
+                  {visibleCols.stage && <th className="py-2 px-3">Pipeline Stage</th>}
+                  {visibleCols.qualification && <th className="py-2 px-3">Qualification</th>}
+                  {visibleCols.outreach && <th className="py-2 px-3">Outreach Approval</th>}
+                  {visibleCols.nextAction && <th className="py-2 px-3">Next Action</th>}
+                  {visibleCols.quickActions && (
+                    <th className="py-2 px-3">Message &amp; Bookmark</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-app-border">
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td colSpan={11} className="py-3.5 px-4">
+                      <td colSpan={12} className="py-3.5 px-4">
                         <div className="h-4 bg-app-secondary rounded w-full" />
                       </td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="py-12 text-center text-text-secondary">
-                      <div className="max-w-sm mx-auto space-y-2">
+                    <td colSpan={12} className="py-12 text-center text-text-secondary">
+                      <div className="max-w-md mx-auto space-y-2.5">
                         <p className="font-heading font-semibold text-sm text-text-primary">
-                          No leads match the active filters
+                          No leads in this view yet
                         </p>
                         <p className="text-xs text-text-muted">
-                          Reset your filters, add a new lead manually, or import a spreadsheet.
+                          Import your `.xlsx` or `.csv` spreadsheet directly here, or add a new lead manually. Clicking any lead opens its centered card.
                         </p>
-                        <div className="flex justify-center gap-2 pt-2">
+                        <div className="flex flex-wrap justify-center gap-2 pt-2">
                           <button
                             type="button"
-                            onClick={resetFilters}
-                            className="px-3 py-1.5 rounded-lg bg-app-secondary text-text-primary text-xs"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-accent/50 text-accent text-xs font-semibold"
                           >
-                            Reset Filters
+                            <Upload className="w-3.5 h-3.5" />
+                            Import .XLSX / .CSV
                           </button>
                           <button
                             type="button"
                             onClick={onOpenQuickAdd}
-                            className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold"
+                            className="px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
                           >
                             + Add Lead
+                          </button>
+                          <button
+                            type="button"
+                            onClick={resetFilters}
+                            className="px-3 py-2 rounded-lg bg-app-secondary text-text-primary text-xs"
+                          >
+                            Reset Filters
                           </button>
                         </div>
                       </div>
@@ -743,17 +1172,22 @@ export function LeadsDatabaseView({
                       .toLowerCase()
                       .includes("directory");
                     const hasEvidenceAnomaly = !r.contactEvidenceValid;
+                    const msgStatus = r.messageStatus || "not_messaged";
 
                     return (
                       <tr
                         key={r.id}
-                        className={`transition group ${
+                        onClick={() => onOpenLead(r.id)}
+                        className={`transition group cursor-pointer ${
                           isSelected
                             ? "bg-accent/10"
                             : "hover:bg-app-secondary/70"
                         }`}
                       >
-                        <td className="py-2.5 px-3">
+                        <td
+                          className="py-2 px-3"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           <button
                             type="button"
                             onClick={() => toggleRowSelection(r.id)}
@@ -768,7 +1202,7 @@ export function LeadsDatabaseView({
                           </button>
                         </td>
 
-                        <td className="py-2.5 px-3">
+                        <td className="py-2 px-3">
                           <div className="flex items-center gap-2.5">
                             <div className="w-7 h-7 rounded-lg bg-accent/15 border border-accent/30 text-accent font-heading font-bold text-[11px] flex items-center justify-center shrink-0">
                               {r.name.slice(0, 2).toUpperCase()}
@@ -776,8 +1210,11 @@ export function LeadsDatabaseView({
                             <div className="min-w-0">
                               <button
                                 type="button"
-                                onClick={() => onOpenLead(r.id)}
-                                className="font-heading font-semibold text-text-primary hover:text-accent text-left truncate block"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onOpenLead(r.id);
+                                }}
+                                className="font-sans font-semibold text-text-primary group-hover:text-accent text-left truncate block"
                               >
                                 {r.name}
                               </button>
@@ -800,7 +1237,10 @@ export function LeadsDatabaseView({
                         </td>
 
                         {visibleCols.website && (
-                          <td className="py-2.5 px-3 font-mono">
+                          <td
+                            className="py-2 px-3 font-mono"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             {r.normalizedDomain ? (
                               <a
                                 href={
@@ -816,13 +1256,13 @@ export function LeadsDatabaseView({
                                 <ExternalLink className="w-3 h-3 opacity-60" />
                               </a>
                             ) : (
-                              <span className="text-text-muted italic">Unresolved</span>
+                              <span className="text-text-muted font-sans">Unresolved</span>
                             )}
                           </td>
                         )}
 
                         {visibleCols.country && (
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <span className="text-text-primary">{r.country || "—"}</span>
                             {r.market && (
                               <span className="ml-1.5 text-[10px] font-mono px-1.5 py-0.5 rounded bg-app-secondary text-text-muted">
@@ -833,7 +1273,7 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.niche && (
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <span className="px-2 py-0.5 rounded-md bg-accent/15 text-accent font-medium text-[11px]">
                               {r.industry || r.categories?.[0] || "General"}
                             </span>
@@ -841,9 +1281,9 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.verification && (
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono ${
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-sans font-medium ${
                                 isDirOnly
                                   ? "bg-status-warning/15 text-status-warning border border-status-warning/30"
                                   : "bg-status-success/10 text-status-success"
@@ -856,11 +1296,14 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.score && (
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <button
                               type="button"
-                              onClick={() => onOpenLead(r.id)}
-                              className={`px-2 py-0.5 rounded font-mono font-semibold text-xs ${
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenLead(r.id);
+                              }}
+                              className={`px-2 py-0.5 rounded font-heading font-semibold tabular-nums text-xs ${
                                 r.effectiveScore !== null && r.effectiveScore >= 75
                                   ? "bg-status-success/15 text-status-success"
                                   : r.effectiveScore !== null && r.effectiveScore >= 50
@@ -876,7 +1319,10 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.stage && (
-                          <td className="py-2.5 px-3">
+                          <td
+                            className="py-2 px-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <select
                               aria-label={`Pipeline stage for ${r.name}`}
                               value={r.primaryStageId || "stg_new"}
@@ -893,13 +1339,13 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.qualification && (
-                          <td className="py-2.5 px-3 font-mono text-[11px] text-text-secondary">
+                          <td className="py-2 px-3 font-mono text-[11px] text-text-secondary">
                             {r.qualificationDecision}
                           </td>
                         )}
 
                         {visibleCols.outreach && (
-                          <td className="py-2.5 px-3">
+                          <td className="py-2 px-3">
                             <span
                               className={`font-mono text-[11px] px-2 py-0.5 rounded ${
                                 r.outreachApproval === "approved"
@@ -915,8 +1361,71 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.nextAction && (
-                          <td className="py-2.5 px-3 text-text-secondary truncate max-w-[180px]">
+                          <td className="py-2 px-3 text-text-secondary truncate max-w-[160px]">
                             {r.nextAction || "Review"}
+                          </td>
+                        )}
+
+                        {visibleCols.quickActions && (
+                          <td
+                            className="py-2 px-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) =>
+                                  handleQuickMessageStatus(
+                                    r.id,
+                                    r.name,
+                                    msgStatus === "not_messaged"
+                                      ? "message_sent"
+                                      : msgStatus === "message_sent"
+                                      ? "followup_sent"
+                                      : msgStatus === "followup_sent"
+                                      ? "replied"
+                                      : "not_messaged",
+                                    "Outreach",
+                                    e
+                                  )
+                                }
+                                title="Click to cycle Message Status (Not Messaged → Message Sent → Follow-up Sent → Replied)"
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition ${
+                                  msgStatus === "replied"
+                                    ? "bg-status-success/20 border-status-success/40 text-status-success"
+                                    : msgStatus === "message_sent" ||
+                                      msgStatus === "followup_sent"
+                                    ? "bg-accent/20 border-accent/40 text-accent"
+                                    : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                                }`}
+                              >
+                                <Send className="w-3 h-3" />
+                                {msgStatus === "message_sent"
+                                  ? "Sent"
+                                  : msgStatus === "followup_sent"
+                                  ? "Follow-up"
+                                  : msgStatus === "replied"
+                                  ? "Replied"
+                                  : "Message"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleBookmark(r.id, r.name, e)}
+                                title="Bookmark Website to Design Inspirations"
+                                className={`p-1.5 rounded border transition ${
+                                  r.isBookmarked
+                                    ? "bg-accent text-white border-accent"
+                                    : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
+                                }`}
+                              >
+                                <Bookmark
+                                  className={`w-3.5 h-3.5 ${
+                                    r.isBookmarked ? "fill-current" : ""
+                                  }`}
+                                />
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -931,11 +1440,11 @@ export function LeadsDatabaseView({
           <div className="px-4 py-3 bg-app-secondary border-t border-app-border flex flex-wrap items-center justify-between gap-3 text-xs text-text-secondary">
             <div>
               Showing{" "}
-              <strong className="font-mono text-text-primary">
+              <strong className="font-sans font-semibold tabular-nums text-text-primary">
                 {rows.length === 0 ? 0 : (page - 1) * pageSize + 1}–
                 {Math.min(totalCount, page * pageSize)}
               </strong>{" "}
-              of <strong className="font-mono text-text-primary">{totalCount}</strong> records
+              of <strong className="font-sans font-semibold tabular-nums text-text-primary">{totalCount}</strong> records
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -954,7 +1463,7 @@ export function LeadsDatabaseView({
                     key={pNum}
                     type="button"
                     onClick={() => setPage(pNum)}
-                    className={`w-7 h-7 rounded-lg font-mono text-xs ${
+                    className={`w-7 h-7 rounded-lg font-sans tabular-nums text-xs ${
                       page === pNum
                         ? "bg-accent text-white font-semibold"
                         : "bg-app-surface border border-app-border text-text-secondary hover:text-text-primary"
@@ -997,37 +1506,85 @@ export function LeadsDatabaseView({
                       {stg.name}
                     </span>
                   </div>
-                  <span className="font-mono text-[11px] px-2 py-0.5 rounded bg-app-secondary text-text-secondary">
+                  <span className="font-heading font-semibold tabular-nums text-[11px] px-2 py-0.5 rounded bg-app-secondary text-text-secondary">
                     {stageRows.length}
                   </span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                  {stageRows.map((r) => (
-                    <div
-                      key={r.id}
-                      onClick={() => onOpenLead(r.id)}
-                      className="p-3 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border cursor-pointer transition space-y-2"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-heading font-semibold text-xs text-text-primary">
-                          {r.name}
-                        </span>
-                        {r.effectiveScore !== null && (
-                          <span className="px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-mono text-[10px]">
-                            {r.effectiveScore}
+                  {stageRows.map((r) => {
+                    const msgStatus = r.messageStatus || "not_messaged";
+                    return (
+                      <div
+                        key={r.id}
+                        onClick={() => onOpenLead(r.id)}
+                        className="p-3 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border cursor-pointer transition space-y-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-sans font-semibold text-xs text-text-primary">
+                            {r.name}
                           </span>
-                        )}
+                          <div className="flex items-center gap-1">
+                            {r.effectiveScore !== null && (
+                              <span className="px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-heading font-semibold tabular-nums text-[10px]">
+                                {r.effectiveScore}
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleBookmark(r.id, r.name, e)}
+                              title="Bookmark Website to Design Inspirations"
+                              className={`p-1 rounded ${
+                                r.isBookmarked
+                                  ? "text-accent"
+                                  : "text-text-muted hover:text-text-primary"
+                              }`}
+                            >
+                              <Bookmark
+                                className={`w-3.5 h-3.5 ${
+                                  r.isBookmarked ? "fill-current" : ""
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="text-[11px] font-mono text-text-secondary truncate">
+                          {r.normalizedDomain || "No domain"} • {r.country}
+                        </div>
+                        <div
+                          className="flex items-center justify-between pt-1.5 border-t border-app-border/60 text-[10px]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) =>
+                              handleQuickMessageStatus(
+                                r.id,
+                                r.name,
+                                msgStatus === "not_messaged" ? "message_sent" : "replied",
+                                "Outreach",
+                                e
+                              )
+                            }
+                            className={`px-2 py-0.5 rounded font-medium border ${
+                              msgStatus !== "not_messaged"
+                                ? "bg-accent/20 border-accent/40 text-accent"
+                                : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            {msgStatus === "message_sent"
+                              ? "✓ Message Sent"
+                              : msgStatus === "followup_sent"
+                              ? "✓ Follow-up Sent"
+                              : msgStatus === "replied"
+                              ? "★ Replied"
+                              : "Send / Mark Sent"}
+                          </button>
+                          <span className="text-text-muted font-mono">{r.industry || "General"}</span>
+                        </div>
                       </div>
-                      <div className="text-[11px] font-mono text-text-secondary truncate">
-                        {r.normalizedDomain || "No domain"} • {r.country}
-                      </div>
-                      <div className="flex items-center justify-between pt-1 text-[10px] text-text-muted">
-                        <span>{r.industry || "General"}</span>
-                        <span>{r.verificationLevel}</span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -1038,34 +1595,110 @@ export function LeadsDatabaseView({
       {/* VIEW 3: CARDS GRID VIEW */}
       {viewMode === "cards" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {rows.map((r) => (
-            <div
-              key={r.id}
-              onClick={() => onOpenLead(r.id)}
-              className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition space-y-3"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h3 className="font-heading font-semibold text-sm text-text-primary">
-                    {r.name}
-                  </h3>
-                  <div className="text-xs font-mono text-accent">
-                    {r.normalizedDomain || "Directory-only record"}
+          {rows.map((r) => {
+            const msgStatus = r.messageStatus || "not_messaged";
+            return (
+              <div
+                key={r.id}
+                onClick={() => onOpenLead(r.id)}
+                className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition space-y-3 flex flex-col justify-between"
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="font-heading font-semibold text-sm text-text-primary">
+                        {r.name}
+                      </h3>
+                      <div className="text-xs font-mono text-accent">
+                        {r.normalizedDomain || "Directory-only record"}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded bg-app-secondary font-mono text-[11px] text-text-secondary">
+                        {r.country}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleBookmark(r.id, r.name, e)}
+                        title="Bookmark Website to Design Inspirations"
+                        className={`p-1.5 rounded-lg border transition ${
+                          r.isBookmarked
+                            ? "bg-accent text-white border-accent"
+                            : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        <Bookmark
+                          className={`w-3.5 h-3.5 ${r.isBookmarked ? "fill-current" : ""}`}
+                        />
+                      </button>
+                    </div>
                   </div>
+                  <p className="text-xs text-text-secondary line-clamp-2">
+                    {r.observedFacts || "No site observations recorded."}
+                  </p>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-app-secondary font-mono text-[11px] text-text-secondary">
-                  {r.country}
-                </span>
+
+                <div
+                  className="pt-2.5 border-t border-app-border flex flex-wrap items-center justify-between gap-2 text-[11px]"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) =>
+                        handleQuickMessageStatus(
+                          r.id,
+                          r.name,
+                          msgStatus === "not_messaged" ? "message_sent" : "followup_sent",
+                          "Outreach",
+                          e
+                        )
+                      }
+                      className={`px-2 py-1 rounded-md font-medium border ${
+                        msgStatus === "message_sent" || msgStatus === "followup_sent"
+                          ? "bg-accent text-white border-accent"
+                          : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {msgStatus === "message_sent"
+                        ? "✓ Message Sent"
+                        : msgStatus === "followup_sent"
+                        ? "✓ Follow-up Sent"
+                        : "Mark Message Sent"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) =>
+                        handleQuickMessageStatus(r.id, r.name, "replied", "Outreach", e)
+                      }
+                      className={`px-2 py-1 rounded-md font-medium border ${
+                        msgStatus === "replied"
+                          ? "bg-status-success text-black border-status-success font-semibold"
+                          : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      Replied
+                    </button>
+                  </div>
+
+                  {r.websiteUrl && (
+                    <a
+                      href={
+                        r.websiteUrl.startsWith("http")
+                          ? r.websiteUrl
+                          : `https://${r.websiteUrl}`
+                      }
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-accent hover:underline"
+                    >
+                      Site <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </div>
               </div>
-              <p className="text-xs text-text-secondary line-clamp-2">
-                {r.observedFacts || "No site observations recorded."}
-              </p>
-              <div className="flex items-center justify-between pt-2 border-t border-app-border text-[11px] font-mono text-text-muted">
-                <span>{r.industry}</span>
-                <span>{r.verificationLevel}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
