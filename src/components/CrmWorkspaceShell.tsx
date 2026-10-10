@@ -575,11 +575,16 @@ export function CrmWorkspaceShell({
           <div className="space-y-1">
             {!sidebarCollapsed && (
               <div className="px-2.5 text-[10px] font-mono uppercase tracking-wider text-text-muted">
-                Library
+                Library &amp; Bookmarks
               </div>
             )}
             {[
-              { id: "references", label: "References", icon: Bookmark },
+              {
+                id: "references",
+                label: "Design Inspirations",
+                icon: Bookmark,
+                badge: references.length,
+              },
               { id: "content", label: "Content Ideas", icon: Video },
             ].map((item) => {
               const Icon = item.icon;
@@ -589,14 +594,27 @@ export function CrmWorkspaceShell({
                   key={item.id}
                   type="button"
                   onClick={() => setActiveNav(item.id as NavSection)}
-                  className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs font-medium transition ${
+                  className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition ${
                     isActive
                       ? "bg-accent text-white"
                       : "text-text-secondary hover:text-text-primary hover:bg-app-surface"
                   }`}
                 >
-                  <Icon className="w-4 h-4 shrink-0" />
-                  {!sidebarCollapsed && <span>{item.label}</span>}
+                  <span className="flex items-center gap-2.5 truncate">
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                  </span>
+                  {!sidebarCollapsed && item.badge !== undefined && (
+                    <span
+                      className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                        isActive
+                          ? "bg-white/20 text-white"
+                          : "bg-app-surface text-text-muted"
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -739,7 +757,7 @@ export function CrmWorkspaceShell({
             <div className="space-y-6">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <h1 className="text-2xl font-heading font-bold text-text-primary">
+                  <h1 className="text-xl font-heading font-bold text-text-primary">
                     Good evening, Jayant
                   </h1>
                   <p className="text-xs text-text-secondary mt-0.5">
@@ -748,7 +766,7 @@ export function CrmWorkspaceShell({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs font-mono">
+                <div className="flex items-center gap-2 text-xs">
                   <span className="px-2.5 py-1 rounded-lg bg-app-surface border border-app-border text-text-secondary">
                     Ledger Integrity: <strong className="text-status-success">Verified</strong>
                   </span>
@@ -758,7 +776,7 @@ export function CrmWorkspaceShell({
                       setSelectedCollectionId("col_global_ecommerce");
                       setActiveNav("collection_detail");
                     }}
-                    className="px-3 py-1 rounded-lg bg-accent/15 text-accent hover:bg-accent/25 font-sans font-medium"
+                    className="px-3 py-1 rounded-lg bg-accent/15 text-accent hover:bg-accent/25 font-sans font-medium tabular-nums"
                   >
                     Open Global E-Commerce Ledger ({totalLeadsCount}) →
                   </button>
@@ -775,11 +793,11 @@ export function CrmWorkspaceShell({
                   className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs text-text-secondary">Total Leads</div>
-                    <div className="text-2xl font-heading font-bold text-text-primary mt-1">
+                    <div className="text-xs font-medium text-text-secondary">Total Leads</div>
+                    <div className="text-2xl font-heading font-bold text-text-primary tabular-nums mt-1">
                       {totalLeadsCount}
                     </div>
-                    <div className="text-[11px] font-mono text-status-info mt-1">
+                    <div className="text-[11px] font-sans text-status-info tabular-nums mt-1">
                       {indiaLeadsCount} India • {intlLeadsCount} International
                     </div>
                   </div>
@@ -796,13 +814,13 @@ export function CrmWorkspaceShell({
                   className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs text-text-secondary">
+                    <div className="text-xs font-medium text-text-secondary">
                       Needs Verification / Action
                     </div>
-                    <div className="text-2xl font-heading font-bold text-status-warning mt-1">
+                    <div className="text-2xl font-heading font-bold text-status-warning tabular-nums mt-1">
                       {directoryOnlyLeadsCount + flaggedEvidenceLeadsCount}
                     </div>
-                    <div className="text-[11px] font-mono text-text-muted mt-1">
+                    <div className="text-[11px] font-sans text-text-muted tabular-nums mt-1">
                       {directoryOnlyLeadsCount} directory-only • {highPriorityLeadsCount} scored high
                     </div>
                   </div>
@@ -816,11 +834,11 @@ export function CrmWorkspaceShell({
                   className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs text-text-secondary">Follow-ups Due</div>
-                    <div className="text-2xl font-heading font-bold text-status-error mt-1">
+                    <div className="text-xs font-medium text-text-secondary">Follow-ups Due</div>
+                    <div className="text-2xl font-heading font-bold text-status-error tabular-nums mt-1">
                       {followUpsDueCount}
                     </div>
-                    <div className="text-[11px] font-mono text-text-muted mt-1">
+                    <div className="text-[11px] font-sans text-text-muted tabular-nums mt-1">
                       {overdueTasksCount} overdue • {tasks.length} total tasks
                     </div>
                   </div>
@@ -834,11 +852,11 @@ export function CrmWorkspaceShell({
                   className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition flex items-center justify-between"
                 >
                   <div>
-                    <div className="text-xs text-text-secondary">Pipeline Value</div>
-                    <div className="text-2xl font-heading font-bold text-status-success mt-1">
+                    <div className="text-xs font-medium text-text-secondary">Pipeline Value</div>
+                    <div className="text-2xl font-heading font-bold text-status-success tabular-nums mt-1">
                       ₹{(confirmedPipelineValue / 100000).toFixed(2)}L
                     </div>
-                    <div className="text-[11px] font-mono text-text-muted mt-1">
+                    <div className="text-[11px] font-sans text-text-muted tabular-nums mt-1">
                       {opportunities.length} open opportunities
                     </div>
                   </div>
@@ -922,11 +940,11 @@ export function CrmWorkspaceShell({
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
-                                <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border font-mono text-[10px] text-text-secondary">
+                                <span className="px-2 py-0.5 rounded bg-app-surface border border-app-border font-sans text-[10px] font-medium text-text-secondary">
                                   {t.taskType}
                                 </span>
                                 <span
-                                  className={`font-mono text-[11px] ${
+                                  className={`font-mono text-[11px] tabular-nums ${
                                     isOverdue
                                       ? "text-status-error font-semibold"
                                       : "text-status-warning"
@@ -966,7 +984,7 @@ export function CrmWorkspaceShell({
                             />
                             {c.name}
                           </span>
-                          <span className="font-mono text-text-secondary">
+                          <span className="font-sans font-semibold tabular-nums text-text-secondary">
                             {c.leadCount || 0}
                           </span>
                         </div>
@@ -980,19 +998,19 @@ export function CrmWorkspaceShell({
                     </div>
                     <div className="flex justify-between text-text-secondary">
                       <span>Site Description Verified:</span>
-                      <strong className="font-mono text-status-success">
+                      <strong className="font-heading tabular-nums text-status-success">
                         {siteDescriptionLeadsCount}
                       </strong>
                     </div>
                     <div className="flex justify-between text-text-secondary">
                       <span>Directory-Only Unresolved:</span>
-                      <strong className="font-mono text-status-warning">
+                      <strong className="font-heading tabular-nums text-status-warning">
                         {directoryOnlyLeadsCount}
                       </strong>
                     </div>
                     <div className="flex justify-between text-text-secondary">
                       <span>Flagged URL Anomalies:</span>
-                      <strong className="font-mono text-status-error">
+                      <strong className="font-heading tabular-nums text-status-error">
                         {flaggedEvidenceLeadsCount}
                       </strong>
                     </div>
@@ -1028,7 +1046,7 @@ export function CrmWorkspaceShell({
                           className="text-xs border-l-2 border-accent pl-3 py-0.5 space-y-0.5"
                         >
                           <div className="font-medium text-text-primary">{act.title}</div>
-                          <div className="font-mono text-[10px] text-text-muted">
+                          <div className="font-mono text-[10px] text-text-muted tabular-nums">
                             {act.actorOrigin.toUpperCase()} •{" "}
                             {new Date(act.createdAt).toLocaleTimeString([], {
                               hour: "2-digit",
@@ -1083,7 +1101,7 @@ export function CrmWorkspaceShell({
                   ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
-                        <thead className="bg-app-secondary text-text-muted font-mono uppercase text-[10px]">
+                        <thead className="bg-app-secondary text-text-muted font-sans font-semibold uppercase text-[11px]">
                           <tr>
                             <th className="py-2 px-3">Company</th>
                             <th className="py-2 px-3">Market / Country</th>
@@ -1100,25 +1118,25 @@ export function CrmWorkspaceShell({
                               onClick={() => setActiveLeadProfileId(o.id)}
                               className="hover:bg-app-secondary/60 cursor-pointer"
                             >
-                              <td className="py-2.5 px-3 font-medium text-text-primary">
+                              <td className="py-2 px-3 font-medium text-text-primary">
                                 {o.name}
                               </td>
-                              <td className="py-2.5 px-3 text-text-secondary">
+                              <td className="py-2 px-3 text-text-secondary">
                                 {o.country} ({o.market})
                               </td>
-                              <td className="py-2.5 px-3 text-text-secondary">{o.industry}</td>
-                              <td className="py-2.5 px-3 font-mono text-[11px]">
+                              <td className="py-2 px-3 text-text-secondary">{o.industry}</td>
+                              <td className="py-2 px-3 font-sans text-[11px]">
                                 <span
                                   className={
                                     (o.verificationLevel || "").includes("directory")
-                                      ? "text-status-warning"
-                                      : "text-status-success"
+                                      ? "text-status-warning font-medium"
+                                      : "text-status-success font-medium"
                                   }
                                 >
                                   {o.verificationLevel}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 font-mono text-[11px] text-text-muted">
+                              <td className="py-2 px-3 font-mono text-[11px] text-text-muted">
                                 {o.outreachApproval}
                               </td>
                             </tr>
@@ -1218,7 +1236,7 @@ export function CrmWorkspaceShell({
                           <h2 className="text-base font-heading font-bold text-text-primary group-hover:text-accent transition">
                             {col.name}
                           </h2>
-                          <div className="text-xs font-mono text-text-secondary mt-0.5">
+                          <div className="text-xs font-sans text-text-secondary tabular-nums mt-0.5">
                             {col.leadCount || 0} leads • Default view: {col.defaultView}
                           </div>
                         </button>
@@ -1560,6 +1578,8 @@ export function CrmWorkspaceShell({
       {activeLeadProfileId && (
         <LeadProfileModal
           organizationId={activeLeadProfileId}
+          allOrganizationIds={organizations.map((o: { id: string }) => o.id)}
+          onSelectOrganization={(id) => setActiveLeadProfileId(id)}
           collections={collections}
           stages={stages}
           fieldDefinitions={fieldDefinitions}
