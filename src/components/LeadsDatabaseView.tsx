@@ -21,13 +21,16 @@ import {
   SlidersHorizontal,
   Archive,
   Send,
-  Mail,
   Heart,
   X,
   Sparkles,
   MessageSquare,
+  Compass,
+  Maximize2,
+  RefreshCw,
 } from "lucide-react";
 import { triggerLocalBrowserFileDownload } from "@/lib/browser-storage";
+import { resolveLeadWebPages } from "./LeadProfileModal";
 
 interface LeadsDatabaseViewProps {
   collectionId?: string;
@@ -60,6 +63,9 @@ export function LeadsDatabaseView({
 
   const [viewMode, setViewMode] = useState<"table" | "swipe" | "cards" | "kanban" | "map">("table");
   const [swipeIndex, setSwipeIndex] = useState(0);
+  const [swipeSiteMode, setSwipeSiteMode] = useState<"none" | "website" | "contact">("none");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [inTabPreview, setInTabPreview] = useState<{ lead: any; mode: "website" | "contact" } | null>(null);
   const [importingFile, setImportingFile] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -819,266 +825,338 @@ export function LeadsDatabaseView({
         </div>
       )}
 
-      {/* VIEW 0: TINDER-STYLE CENTERED SWIPE DECK VIEW */}
+      {/* VIEW 0: TINDER-STYLE CENTERED SWIPE DECK VIEW (MUCH BIGGER, UNCLUTTERED & IN-TAB SITE VIEWER) */}
       {viewMode === "swipe" && (
         <div className="py-6 flex flex-col items-center justify-center">
           {rows.length === 0 ? (
-            <div className="max-w-md w-full bg-app-surface border border-app-border rounded-2xl p-8 text-center space-y-3 shadow-xl">
-              <p className="font-heading font-bold text-base text-text-primary">
+            <div className="max-w-lg w-full bg-app-surface border border-app-border rounded-3xl p-10 text-center space-y-4 shadow-xl">
+              <p className="font-heading font-bold text-lg text-text-primary">
                 No Leads in Deck Yet
               </p>
-              <p className="text-xs text-text-secondary">
+              <p className="text-sm text-text-secondary">
                 Import your `.xlsx` or `.csv` spreadsheet or add a lead to start swiping and reviewing cards in the center.
               </p>
-              <div className="flex justify-center gap-2 pt-2">
+              <div className="flex justify-center gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-app-secondary hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent"
                 >
-                  <Upload className="w-3.5 h-3.5" />
+                  <Upload className="w-4 h-4" />
                   Import .XLSX / .CSV
                 </button>
                 <button
                   type="button"
                   onClick={onOpenQuickAdd}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-accent text-white text-xs font-semibold"
+                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-accent text-white text-xs font-semibold"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                   + Add Lead
                 </button>
               </div>
             </div>
           ) : (
-            activeSwipeLead && (
-              <div className="w-full max-w-xl bg-app-surface border border-app-border rounded-2xl shadow-2xl overflow-hidden transition-all">
-                {/* Card Top Banner */}
-                <div className="p-6 bg-gradient-to-br from-app-sidebar via-app-surface to-app-secondary border-b border-app-border space-y-3">
-                  <div className="flex items-center justify-between text-xs font-mono text-text-muted">
-                    <span>
-                      LEAD CARD {swipeIndex + 1} OF {rows.length} •{" "}
-                      {activeSwipeLead.externalId || activeSwipeLead.id.slice(0, 8)}
-                    </span>
-                    <div className="flex items-center gap-1.5">
+            activeSwipeLead && (() => {
+              const swipeUrls = resolveLeadWebPages(activeSwipeLead);
+              const activeSwipePreviewUrl =
+                swipeSiteMode === "contact"
+                  ? swipeUrls.contactPageUrl || swipeUrls.websitePageUrl
+                  : swipeUrls.websitePageUrl || swipeUrls.contactPageUrl;
+
+              return (
+                <div className="w-full max-w-4xl bg-app-surface border border-app-border rounded-3xl shadow-2xl overflow-hidden transition-all">
+                  {/* Card Top Banner */}
+                  <div className="p-7 bg-gradient-to-br from-app-sidebar via-app-surface to-app-secondary border-b border-app-border space-y-4">
+                    <div className="flex items-center justify-between text-xs font-mono text-text-muted">
+                      <span>
+                        LEAD CARD {swipeIndex + 1} OF {rows.length} •{" "}
+                        {activeSwipeLead.externalId || activeSwipeLead.id.slice(0, 8)}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwipeSiteMode("none");
+                            setSwipeIndex((p) => (p - 1 >= 0 ? p - 1 : rows.length - 1));
+                          }}
+                          className="p-1.5 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
+                          title="Previous Lead"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSwipeSiteMode("none");
+                            setSwipeIndex((p) => (p + 1 < rows.length ? p + 1 : 0));
+                          }}
+                          className="p-1.5 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
+                          title="Next Lead"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex items-start gap-4">
+                        <div className="w-16 h-16 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-xl flex items-center justify-center shrink-0">
+                          {activeSwipeLead.name.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenLead(activeSwipeLead.id)}
+                            className="text-2xl font-heading font-bold text-text-primary hover:text-accent text-left"
+                          >
+                            {activeSwipeLead.name}
+                          </button>
+                          <div className="flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
+                            <span>{activeSwipeLead.country || "Global"}</span>
+                            <span>•</span>
+                            <span className="px-2.5 py-0.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
+                              {activeSwipeLead.industry || "E-Commerce"}
+                            </span>
+
+                            {/* Both Website Page and Contact Page Buttons Side-by-Side (Open in This Tab Only) */}
+                            {swipeUrls.websitePageUrl && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSwipeSiteMode(
+                                    swipeSiteMode === "website" ? "none" : "website"
+                                  )
+                                }
+                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-semibold transition ${
+                                  swipeSiteMode === "website"
+                                    ? "bg-accent text-white border-accent"
+                                    : "bg-accent/15 hover:bg-accent text-accent hover:text-white border-accent/40"
+                                }`}
+                              >
+                                <Globe className="w-3.5 h-3.5" />
+                                Website Page ({swipeUrls.displayDomain || "In-Tab"})
+                              </button>
+                            )}
+
+                            {swipeUrls.contactPageUrl && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSwipeSiteMode(
+                                    swipeSiteMode === "contact" ? "none" : "contact"
+                                  )
+                                }
+                                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl border text-xs font-semibold transition ${
+                                  swipeSiteMode === "contact"
+                                    ? "bg-accent text-white border-accent"
+                                    : "bg-app-surface hover:bg-app-elevated text-text-primary border-app-border"
+                                }`}
+                              >
+                                <Compass className="w-3.5 h-3.5 text-accent" />
+                                Contact Page
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() =>
-                          setSwipeIndex((p) => (p - 1 >= 0 ? p - 1 : rows.length - 1))
+                        onClick={(e) =>
+                          handleToggleBookmark(activeSwipeLead.id, activeSwipeLead.name, e)
                         }
-                        className="p-1 rounded bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
-                        title="Previous Lead"
+                        title="Bookmark Website to Design Inspirations"
+                        className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border text-xs font-semibold transition ${
+                          activeSwipeLead.isBookmarked
+                            ? "bg-accent text-white border-accent"
+                            : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
+                        }`}
                       >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSwipeIndex((p) => (p + 1 < rows.length ? p + 1 : 0))
-                        }
-                        className="p-1 rounded bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary"
-                        title="Next Lead"
-                      >
-                        <ChevronRight className="w-4 h-4" />
+                        <Bookmark
+                          className={`w-4 h-4 ${
+                            activeSwipeLead.isBookmarked ? "fill-current" : ""
+                          }`}
+                        />
+                        {activeSwipeLead.isBookmarked ? "Bookmarked" : "Bookmark Site"}
                       </button>
                     </div>
                   </div>
 
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-14 h-14 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-lg flex items-center justify-center shrink-0">
-                        {activeSwipeLead.name.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => onOpenLead(activeSwipeLead.id)}
-                          className="text-xl font-heading font-bold text-text-primary hover:text-accent text-left"
-                        >
-                          {activeSwipeLead.name}
-                        </button>
-                        <div className="flex flex-wrap items-center gap-2 text-xs text-text-secondary mt-1">
-                          {activeSwipeLead.normalizedDomain ? (
-                            <a
-                              href={
-                                activeSwipeLead.websiteUrl?.startsWith("http")
-                                  ? activeSwipeLead.websiteUrl
-                                  : `https://${activeSwipeLead.websiteUrl}`
-                              }
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-accent hover:underline font-mono"
-                            >
-                              <Globe className="w-3.5 h-3.5" />
-                              {activeSwipeLead.normalizedDomain}
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <span className="text-status-warning font-mono">
-                              Directory-only listing
-                            </span>
-                          )}
-                          <span>•</span>
-                          <span>{activeSwipeLead.country || "Global"}</span>
-                          <span>•</span>
-                          <span className="px-2 py-0.5 rounded bg-accent/15 text-accent font-medium">
-                            {activeSwipeLead.industry || "E-Commerce"}
+                  {/* Embedded In-Tab Website / Contact Page Viewer inside Swipe Card when toggled */}
+                  {swipeSiteMode !== "none" && activeSwipePreviewUrl && (
+                    <div className="border-b border-app-border bg-app-sidebar">
+                      <div className="px-6 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-app-border text-xs">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSwipeSiteMode("website")}
+                            className={`px-3 py-1 rounded-lg font-semibold ${
+                              swipeSiteMode === "website"
+                                ? "bg-accent text-white"
+                                : "bg-app-surface text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            Website Page
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSwipeSiteMode("contact")}
+                            className={`px-3 py-1 rounded-lg font-semibold ${
+                              swipeSiteMode === "contact"
+                                ? "bg-accent text-white"
+                                : "bg-app-surface text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            Contact Page
+                          </button>
+                          <span className="font-mono text-text-muted truncate max-w-md ml-2">
+                            {activeSwipePreviewUrl}
                           </span>
                         </div>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={activeSwipePreviewUrl}
+                            target="_self"
+                            className="px-2.5 py-1 rounded-lg bg-app-surface border border-app-border text-text-secondary hover:text-text-primary"
+                          >
+                            Navigate This Tab
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setSwipeSiteMode("none")}
+                            className="px-2.5 py-1 rounded-lg bg-app-surface border border-app-border text-text-secondary hover:text-text-primary"
+                          >
+                            Hide Preview
+                          </button>
+                        </div>
+                      </div>
+                      <div className="h-[460px] bg-white">
+                        <iframe
+                          src={`/api/site-preview?url=${encodeURIComponent(activeSwipePreviewUrl)}`}
+                          title={`${activeSwipeLead.name} preview`}
+                          className="w-full h-full border-0"
+                          sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                        />
                       </div>
                     </div>
+                  )}
+
+                  {/* Card Body — Spacious & Uncluttered */}
+                  <div className="p-7 space-y-5">
+                    <div className="p-5 rounded-2xl bg-app-secondary border border-app-border space-y-2">
+                      <span className="text-xs font-mono uppercase text-text-muted block">
+                        Observed Facts (from Website)
+                      </span>
+                      <p className="text-text-primary leading-relaxed text-base">
+                        {activeSwipeLead.observedFacts || "No site description recorded yet."}
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="p-4 rounded-2xl bg-app-secondary border border-app-border">
+                        <span className="text-xs font-mono uppercase text-text-muted block">
+                          Published Contact
+                        </span>
+                        <span className="font-mono text-sm text-text-primary mt-1 block truncate">
+                          {activeSwipeLead.publishedContact || "Not listed"}
+                        </span>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-app-secondary border border-app-border">
+                        <span className="text-xs font-mono uppercase text-text-muted block">
+                          Verification &amp; Qualification
+                        </span>
+                        <span className="font-mono text-sm text-text-primary mt-1 block">
+                          {activeSwipeLead.verificationLevel} •{" "}
+                          {activeSwipeLead.qualificationDecision}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Simple Message Operations Block right inside the card */}
+                    <div className="p-5 rounded-2xl bg-app-secondary border border-app-border flex flex-wrap items-center justify-between gap-3">
+                      <span className="font-mono text-xs uppercase text-text-muted flex items-center gap-1.5">
+                        <MessageSquare className="w-4 h-4 text-accent" />
+                        Outreach Message Status
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {[
+                          { id: "not_messaged", label: "Not Messaged" },
+                          { id: "message_sent", label: "✓ Message Sent" },
+                          { id: "followup_sent", label: "✓ Follow-up Sent" },
+                          { id: "replied", label: "★ Replied" },
+                        ].map((st) => {
+                          const active =
+                            (activeSwipeLead.messageStatus || "not_messaged") === st.id;
+                          return (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={(e) =>
+                                handleQuickMessageStatus(
+                                  activeSwipeLead.id,
+                                  activeSwipeLead.name,
+                                  st.id as
+                                    | "not_messaged"
+                                    | "message_sent"
+                                    | "followup_sent"
+                                    | "replied",
+                                  "Outreach",
+                                  e
+                                )
+                              }
+                              className={`px-3.5 py-1.5 rounded-xl text-xs font-medium border transition ${
+                                active
+                                  ? "bg-accent text-white border-accent font-semibold"
+                                  : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
+                              }`}
+                            >
+                              {st.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tinder-Style Bottom Action Bar */}
+                  <div className="px-7 py-5 bg-app-sidebar border-t border-app-border flex items-center justify-between gap-4">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleSwipeDecision(activeSwipeLead.id, activeSwipeLead.name, "pass")
+                      }
+                      className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-sm font-semibold transition"
+                    >
+                      <X className="w-4 h-4" />
+                      Pass / Skip
+                    </button>
 
                     <button
                       type="button"
-                      onClick={(e) =>
-                        handleToggleBookmark(activeSwipeLead.id, activeSwipeLead.name, e)
-                      }
-                      title="Bookmark Website to Design Inspirations"
-                      className={`p-2.5 rounded-xl border transition ${
-                        activeSwipeLead.isBookmarked
-                          ? "bg-accent text-white border-accent"
-                          : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
-                      }`}
+                      onClick={() => onOpenLead(activeSwipeLead.id)}
+                      className="inline-flex items-center justify-center gap-2 py-3 px-6 rounded-2xl bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary text-sm font-semibold transition"
                     >
-                      <Bookmark
-                        className={`w-4 h-4 ${
-                          activeSwipeLead.isBookmarked ? "fill-current" : ""
-                        }`}
-                      />
+                      Open Full Card
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleSwipeDecision(
+                          activeSwipeLead.id,
+                          activeSwipeLead.name,
+                          "qualify"
+                        )
+                      }
+                      className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-5 rounded-2xl bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-sm font-semibold transition"
+                    >
+                      <Heart className="w-4 h-4 fill-current" />
+                      Qualify &amp; Approve
                     </button>
                   </div>
                 </div>
-
-                {/* Card Body */}
-                <div className="p-6 space-y-4 text-xs">
-                  <div className="p-3.5 rounded-xl bg-app-secondary border border-app-border space-y-1">
-                    <span className="text-[10px] font-mono uppercase text-text-muted block">
-                      Observed Facts (from Website)
-                    </span>
-                    <p className="text-text-primary leading-relaxed text-sm">
-                      {activeSwipeLead.observedFacts || "No site description recorded yet."}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 rounded-xl bg-app-secondary border border-app-border">
-                      <span className="text-[10px] font-mono uppercase text-text-muted block">
-                        Published Contact
-                      </span>
-                      <span className="font-mono text-text-primary mt-0.5 block truncate">
-                        {activeSwipeLead.publishedContact || "Not listed"}
-                      </span>
-                    </div>
-                    <div className="p-3 rounded-xl bg-app-secondary border border-app-border">
-                      <span className="text-[10px] font-mono uppercase text-text-muted block">
-                        Verification &amp; Qualification
-                      </span>
-                      <span className="font-mono text-text-primary mt-0.5 block">
-                        {activeSwipeLead.verificationLevel} •{" "}
-                        {activeSwipeLead.qualificationDecision}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Simple Message Operations Block right inside the card */}
-                  <div className="p-3.5 rounded-xl bg-app-secondary border border-app-border space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-[10px] uppercase text-text-muted flex items-center gap-1">
-                        <MessageSquare className="w-3.5 h-3.5 text-accent" />
-                        Simple Message Operations
-                      </span>
-                      {activeSwipeLead.websiteUrl && (
-                        <a
-                          href={
-                            activeSwipeLead.websiteUrl.startsWith("http")
-                              ? activeSwipeLead.websiteUrl
-                              : `https://${activeSwipeLead.websiteUrl}`
-                          }
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent hover:underline font-mono text-[11px] inline-flex items-center gap-1"
-                        >
-                          Open Website <ExternalLink className="w-3 h-3" />
-                        </a>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {[
-                        { id: "not_messaged", label: "Not Messaged" },
-                        { id: "message_sent", label: "✓ Message Sent" },
-                        { id: "followup_sent", label: "✓ Follow-up Sent" },
-                        { id: "replied", label: "★ Replied" },
-                      ].map((st) => {
-                        const active =
-                          (activeSwipeLead.messageStatus || "not_messaged") === st.id;
-                        return (
-                          <button
-                            key={st.id}
-                            type="button"
-                            onClick={(e) =>
-                              handleQuickMessageStatus(
-                                activeSwipeLead.id,
-                                activeSwipeLead.name,
-                                st.id as
-                                  | "not_messaged"
-                                  | "message_sent"
-                                  | "followup_sent"
-                                  | "replied",
-                                "Outreach",
-                                e
-                              )
-                            }
-                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
-                              active
-                                ? "bg-accent text-white border-accent font-semibold"
-                                : "bg-app-surface border-app-border text-text-secondary hover:text-text-primary"
-                            }`}
-                          >
-                            {st.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Tinder-Style Bottom Action Bar */}
-                <div className="px-6 py-4 bg-app-sidebar border-t border-app-border flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSwipeDecision(activeSwipeLead.id, activeSwipeLead.name, "pass")
-                    }
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-status-error/15 hover:bg-status-error/25 border border-status-error/30 text-status-error text-xs font-semibold transition"
-                  >
-                    <X className="w-4 h-4" />
-                    Pass / Skip
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => onOpenLead(activeSwipeLead.id)}
-                    className="inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-text-primary text-xs font-semibold transition"
-                  >
-                    Open Full Card
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleSwipeDecision(
-                        activeSwipeLead.id,
-                        activeSwipeLead.name,
-                        "qualify"
-                      )
-                    }
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-status-success/15 hover:bg-status-success/25 border border-status-success/40 text-status-success text-xs font-semibold transition"
-                  >
-                    <Heart className="w-4 h-4 fill-current" />
-                    Qualify &amp; Approve
-                  </button>
-                </div>
-              </div>
-            )
+              );
+            })()
           )}
         </div>
       )}
@@ -1105,7 +1183,7 @@ export function LeadsDatabaseView({
                     </button>
                   </th>
                   <th className="py-2 px-3">Company / Organization</th>
-                  {visibleCols.website && <th className="py-2 px-3">Website</th>}
+                  {visibleCols.website && <th className="py-2 px-3">Website &amp; Contact Page (In-Tab)</th>}
                   {visibleCols.country && <th className="py-2 px-3">Country / Market</th>}
                   {visibleCols.niche && <th className="py-2 px-3">Niche / Category</th>}
                   {visibleCols.verification && <th className="py-2 px-3">Verification</th>}
@@ -1173,6 +1251,7 @@ export function LeadsDatabaseView({
                       .includes("directory");
                     const hasEvidenceAnomaly = !r.contactEvidenceValid;
                     const msgStatus = r.messageStatus || "not_messaged";
+                    const rowUrls = resolveLeadWebPages(r);
 
                     return (
                       <tr
@@ -1241,20 +1320,35 @@ export function LeadsDatabaseView({
                             className="py-2 px-3 font-mono"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {r.normalizedDomain ? (
-                              <a
-                                href={
-                                  r.websiteUrl?.startsWith("http")
-                                    ? r.websiteUrl
-                                    : `https://${r.websiteUrl}`
-                                }
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-status-info hover:underline"
-                              >
-                                {r.normalizedDomain}
-                                <ExternalLink className="w-3 h-3 opacity-60" />
-                              </a>
+                            {rowUrls.websitePageUrl || rowUrls.contactPageUrl ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {rowUrls.websitePageUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setInTabPreview({ lead: r, mode: "website" })
+                                    }
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-status-info/10 hover:bg-status-info/20 text-status-info text-[11px] font-medium transition"
+                                    title="Open Website Page in this tab"
+                                  >
+                                    <Globe className="w-3 h-3" />
+                                    {rowUrls.displayDomain || "Website Page"}
+                                  </button>
+                                )}
+                                {rowUrls.contactPageUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setInTabPreview({ lead: r, mode: "contact" })
+                                    }
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary text-[11px] font-sans font-medium transition"
+                                    title="Open Contact Page in this tab"
+                                  >
+                                    <Compass className="w-3 h-3 text-accent" />
+                                    Contact Page
+                                  </button>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-text-muted font-sans">Unresolved</span>
                             )}
@@ -1597,6 +1691,7 @@ export function LeadsDatabaseView({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {rows.map((r) => {
             const msgStatus = r.messageStatus || "not_messaged";
+            const cardUrls = resolveLeadWebPages(r);
             return (
               <div
                 key={r.id}
@@ -1610,7 +1705,7 @@ export function LeadsDatabaseView({
                         {r.name}
                       </h3>
                       <div className="text-xs font-mono text-accent">
-                        {r.normalizedDomain || "Directory-only record"}
+                        {cardUrls.displayDomain || "Directory-only record"}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -1681,20 +1776,28 @@ export function LeadsDatabaseView({
                     </button>
                   </div>
 
-                  {r.websiteUrl && (
-                    <a
-                      href={
-                        r.websiteUrl.startsWith("http")
-                          ? r.websiteUrl
-                          : `https://${r.websiteUrl}`
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 font-mono text-accent hover:underline"
-                    >
-                      Site <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  <div className="flex items-center gap-1.5">
+                    {cardUrls.websitePageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setInTabPreview({ lead: r, mode: "website" })}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-accent/15 hover:bg-accent text-accent hover:text-white font-medium transition"
+                      >
+                        <Globe className="w-3 h-3" />
+                        Website Page
+                      </button>
+                    )}
+                    {cardUrls.contactPageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setInTabPreview({ lead: r, mode: "contact" })}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary font-medium transition"
+                      >
+                        <Compass className="w-3 h-3 text-accent" />
+                        Contact Page
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1778,6 +1881,137 @@ export function LeadsDatabaseView({
           </div>
         </div>
       )}
+
+      {/* IN-TAB WEBSITE & CONTACT PAGE OVERLAY VIEWER (OPENS IN THIS TAB ONLY) */}
+      {inTabPreview && (() => {
+        const previewUrls = resolveLeadWebPages(inTabPreview.lead);
+        const targetUrl =
+          inTabPreview.mode === "contact"
+            ? previewUrls.contactPageUrl || previewUrls.websitePageUrl
+            : previewUrls.websitePageUrl || previewUrls.contactPageUrl;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4"
+            onClick={() => setInTabPreview(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-[96vw] max-w-[1440px] h-[90vh] bg-app-surface border border-app-border rounded-3xl flex flex-col overflow-hidden shadow-2xl"
+            >
+              <div className="p-4 bg-app-sidebar border-b border-app-border flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-heading font-bold text-base text-text-primary mr-2">
+                    {inTabPreview.lead.name}
+                  </span>
+
+                  {previewUrls.websitePageUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInTabPreview({ lead: inTabPreview.lead, mode: "website" })
+                      }
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+                        inTabPreview.mode === "website"
+                          ? "bg-accent text-white border-accent"
+                          : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
+                      }`}
+                    >
+                      <Globe className="w-4 h-4" />
+                      Website Page
+                    </button>
+                  )}
+
+                  {previewUrls.contactPageUrl && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInTabPreview({ lead: inTabPreview.lead, mode: "contact" })
+                      }
+                      className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition ${
+                        inTabPreview.mode === "contact"
+                          ? "bg-accent text-white border-accent"
+                          : "bg-app-surface hover:bg-app-elevated border-app-border text-text-primary"
+                      }`}
+                    >
+                      <Compass className="w-4 h-4" />
+                      Contact Page
+                    </button>
+                  )}
+
+                  <span className="font-mono text-xs text-text-muted truncate max-w-md ml-2">
+                    {targetUrl}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleToggleBookmark(inTabPreview.lead.id, inTabPreview.lead.name)
+                    }
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold ${
+                      inTabPreview.lead.isBookmarked
+                        ? "bg-accent text-white border-accent"
+                        : "bg-app-surface border-app-border text-text-primary"
+                    }`}
+                  >
+                    <Bookmark className="w-3.5 h-3.5" />
+                    Bookmark Site
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = inTabPreview.lead.id;
+                      setInTabPreview(null);
+                      onOpenLead(id);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-semibold text-text-primary"
+                  >
+                    Open Lead Card
+                  </button>
+
+                  {targetUrl && (
+                    <a
+                      href={targetUrl}
+                      target="_self"
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-xs font-medium text-text-secondary hover:text-text-primary"
+                    >
+                      <Maximize2 className="w-3.5 h-3.5" />
+                      Navigate This Tab
+                    </a>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setInTabPreview(null)}
+                    className="p-2 rounded-xl bg-app-surface hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 bg-white">
+                {targetUrl ? (
+                  <iframe
+                    key={`${targetUrl}-${inTabPreview.mode}`}
+                    src={`/api/site-preview?url=${encodeURIComponent(targetUrl)}`}
+                    title={`${inTabPreview.lead.name} in-tab preview`}
+                    className="w-full h-full border-0"
+                    sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                  />
+                ) : (
+                  <div className="h-full flex items-center justify-center text-sm text-text-secondary">
+                    No website URL available.
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
