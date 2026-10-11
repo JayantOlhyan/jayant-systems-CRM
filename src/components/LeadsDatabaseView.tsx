@@ -95,7 +95,7 @@ export function LeadsDatabaseView({
   >("sequenceNumber");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(50);
+  const [pageSize, setPageSize] = useState<50 | 100 | "unlimited">(50);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [rows, setRows] = useState<any[]>([]);
@@ -1063,7 +1063,7 @@ export function LeadsDatabaseView({
       </div>
 
       {/* Search & Multi-Filter Controls Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 bg-app-surface border border-app-border rounded-xl p-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2.5 bg-app-surface border border-app-border rounded-xl p-3">
         <div className="relative lg:col-span-2">
           <Search className="w-4 h-4 text-text-muted absolute left-3 top-2.5" />
           <input
@@ -1129,7 +1129,7 @@ export function LeadsDatabaseView({
           <option value="disqualified">disqualified</option>
         </select>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 lg:col-span-2">
           <select
             aria-label="Sort Leads"
             value={`${sortBy}:${sortDir}`}
@@ -1148,6 +1148,39 @@ export function LeadsDatabaseView({
             <option value="score:desc">Sort: Highest Score</option>
             <option value="country:asc">Sort: Country (A → Z)</option>
           </select>
+
+          <div
+            className="flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg p-1 text-xs font-mono shrink-0"
+            role="group"
+            aria-label="Leads per page"
+          >
+            <span className="px-1.5 text-[10px] uppercase text-text-muted hidden xl:inline">
+              Per Page:
+            </span>
+            {(
+              [
+                { value: 50, label: "50" },
+                { value: 100, label: "100" },
+                { value: "unlimited", label: "Unlimited" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={String(opt.value)}
+                type="button"
+                onClick={() => {
+                  setPageSize(opt.value);
+                  setPage(1);
+                }}
+                className={`px-2 py-1 rounded-md text-[11px] font-semibold tabular-nums transition ${
+                  pageSize === opt.value
+                    ? "bg-accent text-white shadow-sm"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
 
           <div className="relative">
             <button
@@ -1794,9 +1827,11 @@ export function LeadsDatabaseView({
                     const hasEvidenceAnomaly = !r.contactEvidenceValid;
                     const msgStatus = r.messageStatus || "not_messaged";
                     const rowUrls = resolveLeadWebPages(r);
+                    const numericPageSize =
+                      pageSize === "unlimited" ? Math.max(1, rows.length) : pageSize;
                     const rowNumStr =
                       r.displayNumber ||
-                      formatLeadSequenceNumber((page - 1) * pageSize + rowIdx + 1);
+                      formatLeadSequenceNumber((page - 1) * numericPageSize + rowIdx + 1);
                     const currentCat = r.industry || r.categories?.[0] || "General";
 
                     return (
@@ -2110,32 +2145,69 @@ export function LeadsDatabaseView({
 
           {/* Pagination Footer */}
           <div className="px-4 py-3 bg-app-secondary border-t border-app-border flex flex-wrap items-center justify-between gap-3 text-xs text-text-secondary">
-            <div>
-              Showing{" "}
-              <strong className="font-mono font-semibold tabular-nums text-text-primary">
-                {rows.length === 0
-                  ? "000"
-                  : formatLeadSequenceNumber((page - 1) * pageSize + 1)}
-                –
-                {formatLeadSequenceNumber(Math.min(totalCount, page * pageSize))}
-              </strong>{" "}
-              of{" "}
-              <strong className="font-mono font-semibold tabular-nums text-text-primary">
-                {formatLeadSequenceNumber(totalCount || 0)}
-              </strong>{" "}
-              numbered records
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                Showing{" "}
+                <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                  {rows.length === 0
+                    ? "000"
+                    : pageSize === "unlimited"
+                    ? `001–${formatLeadSequenceNumber(rows.length)}`
+                    : `${formatLeadSequenceNumber((page - 1) * pageSize + 1)}–${formatLeadSequenceNumber(
+                        Math.min(totalCount, page * pageSize)
+                      )}`}
+                </strong>{" "}
+                of{" "}
+                <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                  {formatLeadSequenceNumber(totalCount || 0)}
+                </strong>{" "}
+                numbered records
+              </div>
+
+              <div
+                className="flex items-center gap-1 bg-app-surface border border-app-border rounded-lg p-1 font-mono"
+                role="group"
+                aria-label="Choose leads per page"
+              >
+                <span className="px-2 text-[10px] uppercase text-text-muted">
+                  Show per page:
+                </span>
+                {(
+                  [
+                    { value: 50, label: "50" },
+                    { value: 100, label: "100" },
+                    { value: "unlimited", label: "Unlimited" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={String(opt.value)}
+                    type="button"
+                    onClick={() => {
+                      setPageSize(opt.value);
+                      setPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold tabular-nums transition ${
+                      pageSize === opt.value
+                        ? "bg-accent text-white shadow-sm"
+                        : "text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                disabled={page <= 1}
+                disabled={page <= 1 || pageSize === "unlimited"}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 className="p-1.5 rounded-lg bg-app-surface border border-app-border disabled:opacity-40"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              {Array.from({ length: Math.min(6, totalPages) }).map((_, idx) => {
+              {Array.from({ length: Math.min(8, totalPages) }).map((_, idx) => {
                 const pNum = idx + 1;
                 return (
                   <button
@@ -2154,7 +2226,7 @@ export function LeadsDatabaseView({
               })}
               <button
                 type="button"
-                disabled={page >= totalPages}
+                disabled={page >= totalPages || pageSize === "unlimited"}
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 className="p-1.5 rounded-lg bg-app-surface border border-app-border disabled:opacity-40"
               >
@@ -2279,128 +2351,224 @@ export function LeadsDatabaseView({
 
       {/* VIEW 3: CARDS GRID VIEW */}
       {viewMode === "cards" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {rows.map((r, idx) => {
-            const msgStatus = r.messageStatus || "not_messaged";
-            const cardUrls = resolveLeadWebPages(r);
-            const numStr =
-              r.displayNumber ||
-              formatLeadSequenceNumber((page - 1) * pageSize + idx + 1);
-            return (
-              <div
-                key={r.id}
-                onClick={() => onOpenLead(r.id)}
-                className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition space-y-3 flex flex-col justify-between"
-              >
-                <div className="space-y-2.5">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start gap-2.5">
-                      <span className="font-mono font-bold text-xs px-2 py-1 rounded-lg bg-accent/15 border border-accent/30 text-accent tabular-nums">
-                        #{numStr}
-                      </span>
-                      <div>
-                        <h3 className="font-heading font-semibold text-sm text-text-primary">
-                          {r.name}
-                        </h3>
-                        <div className="text-xs font-mono text-accent">
-                          {cardUrls.displayDomain || "Directory-only record"}
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {rows.map((r, idx) => {
+              const msgStatus = r.messageStatus || "not_messaged";
+              const cardUrls = resolveLeadWebPages(r);
+              const numericPageSize =
+                pageSize === "unlimited" ? Math.max(1, rows.length) : pageSize;
+              const numStr =
+                r.displayNumber ||
+                formatLeadSequenceNumber((page - 1) * numericPageSize + idx + 1);
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => onOpenLead(r.id)}
+                  className="bg-app-surface hover:bg-app-secondary border border-app-border rounded-xl p-4 cursor-pointer transition space-y-3 flex flex-col justify-between"
+                >
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2.5">
+                        <span className="font-mono font-bold text-xs px-2 py-1 rounded-lg bg-accent/15 border border-accent/30 text-accent tabular-nums">
+                          #{numStr}
+                        </span>
+                        <div>
+                          <h3 className="font-heading font-semibold text-sm text-text-primary">
+                            {r.name}
+                          </h3>
+                          <div className="text-xs font-mono text-accent">
+                            {cardUrls.displayDomain || "Directory-only record"}
+                          </div>
                         </div>
                       </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded bg-app-secondary font-mono text-[11px] text-text-secondary">
+                          {r.country}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleBookmark(r.id, r.name, e)}
+                          title="Bookmark Website to Design Inspirations"
+                          className={`p-1.5 rounded-lg border transition ${
+                            r.isBookmarked
+                              ? "bg-accent text-white border-accent"
+                              : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                          }`}
+                        >
+                          <Bookmark
+                            className={`w-3.5 h-3.5 ${r.isBookmarked ? "fill-current" : ""}`}
+                          />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded bg-app-secondary font-mono text-[11px] text-text-secondary">
-                        {r.country}
-                      </span>
+                    <p className="text-xs text-text-secondary line-clamp-2">
+                      {r.observedFacts || "No site observations recorded."}
+                    </p>
+                  </div>
+
+                  <div
+                    className="pt-2.5 border-t border-app-border flex flex-wrap items-center justify-between gap-2 text-[11px]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
-                        onClick={(e) => handleToggleBookmark(r.id, r.name, e)}
-                        title="Bookmark Website to Design Inspirations"
-                        className={`p-1.5 rounded-lg border transition ${
-                          r.isBookmarked
+                        onClick={(e) =>
+                          handleQuickMessageStatus(
+                            r.id,
+                            r.name,
+                            msgStatus === "not_messaged" ? "message_sent" : "followup_sent",
+                            "Outreach",
+                            e
+                          )
+                        }
+                        className={`px-2 py-1 rounded-md font-medium border ${
+                          msgStatus === "message_sent" || msgStatus === "followup_sent"
                             ? "bg-accent text-white border-accent"
                             : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
                         }`}
                       >
-                        <Bookmark
-                          className={`w-3.5 h-3.5 ${r.isBookmarked ? "fill-current" : ""}`}
-                        />
+                        {msgStatus === "message_sent"
+                          ? "✓ Message Sent"
+                          : msgStatus === "followup_sent"
+                          ? "✓ Follow-up Sent"
+                          : "Mark Message Sent"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) =>
+                          handleQuickMessageStatus(r.id, r.name, "replied", "Outreach", e)
+                        }
+                        className={`px-2 py-1 rounded-md font-medium border ${
+                          msgStatus === "replied"
+                            ? "bg-status-success text-black border-status-success font-semibold"
+                            : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        Replied
                       </button>
                     </div>
-                  </div>
-                  <p className="text-xs text-text-secondary line-clamp-2">
-                    {r.observedFacts || "No site observations recorded."}
-                  </p>
-                </div>
 
-                <div
-                  className="pt-2.5 border-t border-app-border flex flex-wrap items-center justify-between gap-2 text-[11px]"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) =>
-                        handleQuickMessageStatus(
-                          r.id,
-                          r.name,
-                          msgStatus === "not_messaged" ? "message_sent" : "followup_sent",
-                          "Outreach",
-                          e
-                        )
-                      }
-                      className={`px-2 py-1 rounded-md font-medium border ${
-                        msgStatus === "message_sent" || msgStatus === "followup_sent"
-                          ? "bg-accent text-white border-accent"
-                          : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
-                      }`}
-                    >
-                      {msgStatus === "message_sent"
-                        ? "✓ Message Sent"
-                        : msgStatus === "followup_sent"
-                        ? "✓ Follow-up Sent"
-                        : "Mark Message Sent"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) =>
-                        handleQuickMessageStatus(r.id, r.name, "replied", "Outreach", e)
-                      }
-                      className={`px-2 py-1 rounded-md font-medium border ${
-                        msgStatus === "replied"
-                          ? "bg-status-success text-black border-status-success font-semibold"
-                          : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
-                      }`}
-                    >
-                      Replied
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    {cardUrls.websitePageUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setInTabPreview({ lead: r, mode: "website" })}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-accent/15 hover:bg-accent text-accent hover:text-white font-medium transition"
-                      >
-                        <Globe className="w-3 h-3" />
-                        Website Page
-                      </button>
-                    )}
-                    {cardUrls.contactPageUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setInTabPreview({ lead: r, mode: "contact" })}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary font-medium transition"
-                      >
-                        <Compass className="w-3 h-3 text-accent" />
-                        Contact Page
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1.5">
+                      {cardUrls.websitePageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setInTabPreview({ lead: r, mode: "website" })}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-accent/15 hover:bg-accent text-accent hover:text-white font-medium transition"
+                        >
+                          <Globe className="w-3 h-3" />
+                          Website Page
+                        </button>
+                      )}
+                      {cardUrls.contactPageUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setInTabPreview({ lead: r, mode: "contact" })}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary font-medium transition"
+                        >
+                          <Compass className="w-3 h-3 text-accent" />
+                          Contact Page
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
+              );
+            })}
+          </div>
+
+          {/* Cards Grid Pagination Footer */}
+          <div className="px-4 py-3 bg-app-surface border border-app-border rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs text-text-secondary">
+            <div className="flex flex-wrap items-center gap-3">
+              <div>
+                Showing{" "}
+                <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                  {rows.length === 0
+                    ? "000"
+                    : pageSize === "unlimited"
+                    ? `001–${formatLeadSequenceNumber(rows.length)}`
+                    : `${formatLeadSequenceNumber((page - 1) * pageSize + 1)}–${formatLeadSequenceNumber(
+                        Math.min(totalCount, page * pageSize)
+                      )}`}
+                </strong>{" "}
+                of{" "}
+                <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                  {formatLeadSequenceNumber(totalCount || 0)}
+                </strong>{" "}
+                cards
               </div>
-            );
-          })}
+
+              <div
+                className="flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg p-1 font-mono"
+                role="group"
+                aria-label="Choose cards per page"
+              >
+                <span className="px-2 text-[10px] uppercase text-text-muted">
+                  Show per page:
+                </span>
+                {(
+                  [
+                    { value: 50, label: "50" },
+                    { value: 100, label: "100" },
+                    { value: "unlimited", label: "Unlimited" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={String(opt.value)}
+                    type="button"
+                    onClick={() => {
+                      setPageSize(opt.value);
+                      setPage(1);
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold tabular-nums transition ${
+                      pageSize === opt.value
+                        ? "bg-accent text-white shadow-sm"
+                        : "text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={page <= 1 || pageSize === "unlimited"}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="p-1.5 rounded-lg bg-app-secondary border border-app-border disabled:opacity-40"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              {Array.from({ length: Math.min(8, totalPages) }).map((_, idx) => {
+                const pNum = idx + 1;
+                return (
+                  <button
+                    key={pNum}
+                    type="button"
+                    onClick={() => setPage(pNum)}
+                    className={`w-7 h-7 rounded-lg font-sans tabular-nums text-xs ${
+                      page === pNum
+                        ? "bg-accent text-white font-semibold"
+                        : "bg-app-secondary border border-app-border text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {pNum}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                disabled={page >= totalPages || pageSize === "unlimited"}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="p-1.5 rounded-lg bg-app-secondary border border-app-border disabled:opacity-40"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2465,7 +2633,7 @@ export function LeadsDatabaseView({
             <h3 className="text-xs font-mono uppercase text-text-muted">
               Leads in {countryFilter || "All Locations"} ({rows.length})
             </h3>
-            {rows.slice(0, 25).map((r) => (
+            {rows.map((r) => (
               <div
                 key={r.id}
                 onClick={() => onOpenLead(r.id)}
