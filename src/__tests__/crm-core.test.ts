@@ -39,6 +39,10 @@ import {
   queryLeadsPaginated,
 } from "../lib/crm-service";
 import { generateLedgerWorkbookBuffer, LEDGER_FILENAME } from "../lib/ledger-fixture";
+import {
+  deduplicateAndDisambiguateWorkspaceState,
+  indexToAlphaSuffix,
+} from "../lib/deduplicate-leads";
 
 describe("Domain & URL Utilities (Section 12.7 & 13.5)", () => {
   it("normalizes root organization domains with public-suffix awareness", () => {
@@ -451,3 +455,114 @@ describe("End-to-End Workflows A–F (Section 13.8 & Section 33)", () => {
     expect(remainingOrgs[0].externalId).toBe("ECOM-IN-001");
   });
 });
+
+describe("Duplicate Erasure & Number Collision Disambiguation (001A, 001B, 001C...)", () => {
+  it("generates alphabetic suffix syllables A, B, C ... Z, AA, AB", () => {
+    expect(indexToAlphaSuffix(0)).toBe("A");
+    expect(indexToAlphaSuffix(1)).toBe("B");
+    expect(indexToAlphaSuffix(2)).toBe("C");
+    expect(indexToAlphaSuffix(25)).toBe("Z");
+    expect(indexToAlphaSuffix(26)).toBe("AA");
+    expect(indexToAlphaSuffix(27)).toBe("AB");
+  });
+
+  it("erases leads with duplicated content and assigns A, B, C codes when numbers are duplicated with different content", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state: Record<string, any> = {
+      organizations: [
+        {
+          id: "org_1",
+          name: "Aura Botanicals",
+          websiteUrl: "https://aurabotanicals.in",
+          normalizedDomain: "aurabotanicals.in",
+          country: "India",
+          externalId: "001",
+          sequenceNumber: 1,
+          daySequenceNumber: 1,
+        },
+        {
+          id: "org_2_dup",
+          name: "Aura Botanicals",
+          websiteUrl: "https://aurabotanicals.in",
+          normalizedDomain: "aurabotanicals.in",
+          country: "India",
+          externalId: "001",
+          sequenceNumber: 2,
+          daySequenceNumber: 1,
+          observedFacts: "Organic skincare brand",
+        },
+        {
+          id: "org_3_diff_content",
+          name: "Veda Crafts Studio",
+          websiteUrl: "https://vedacrafts.com",
+          normalizedDomain: "vedacrafts.com",
+          country: "India",
+          externalId: "001",
+          sequenceNumber: 3,
+          daySequenceNumber: 1,
+        },
+        {
+          id: "org_4_diff_content",
+          name: "Nordic Minimalist Co",
+          websiteUrl: "https://nordicminimal.se",
+          normalizedDomain: "nordicminimal.se",
+          country: "Sweden",
+          externalId: "001",
+          sequenceNumber: 4,
+          daySequenceNumber: 1,
+        },
+        {
+          id: "org_5_unique_num",
+          name: "Kyoto Matcha House",
+          websiteUrl: "https://kyotomatcha.jp",
+          normalizedDomain: "kyotomatcha.jp",
+          country: "Japan",
+          externalId: "002",
+          sequenceNumber: 5,
+          daySequenceNumber: 2,
+        },
+      ],
+      notes: [
+        {
+          id: "note_on_dup",
+          organizationId: "org_2_dup",
+          content: "Note attached to duplicate must be preserved on primary",
+        },
+      ],
+    };
+
+    const report = deduplicateAndDisambiguateWorkspaceState(state);
+
+    // 1. org_2_dup (identical content to org_1) is erased, and its note/observedFacts are merged into org_1
+    expect(report.erasedCount).toBe(1);
+    expect(report.erasedDuplicates[0].erasedId).toBe("org_2_dup");
+    expect(report.erasedDuplicates[0].mergedIntoId).toBe("org_1");
+    expect(state.organizations.length).toBe(4);
+    expect(state.notes[0].organizationId).toBe("org_1");
+
+    // 2. org_1, org_3_diff_content, and org_4_diff_content all share number 001 with DIFFERENT content -> 001A, 001B, 001C!
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const org1 = state.organizations.find((o: Record<string, any>) => o.id === "org_1")!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const org3 = state.organizations.find((o: Record<string, any>) => o.id === "org_3_diff_content")!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const org4 = state.organizations.find((o: Record<string, any>) => o.id === "org_4_diff_content")!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const org5 = state.organizations.find((o: Record<string, any>) => o.id === "org_5_unique_num")!;
+
+    expect(org1.observedFacts).toBe("Organic skincare brand");
+    expect(org1.sequenceCode).toBe("001A");
+    expect(org1.externalId).toBe("001A");
+
+    expect(org3.sequenceCode).toBe("001B");
+    expect(org3.externalId).toBe("001B");
+
+    expect(org4.sequenceCode).toBe("001C");
+    expect(org4.externalId).toBe("001C");
+
+    // 3. org_5_unique_num has unique number 002 -> stays 002 with no suffix
+    expect(org5.sequenceCode).toBe("002");
+    expect(org5.externalId).toBe("002");
+  });
+});
+
