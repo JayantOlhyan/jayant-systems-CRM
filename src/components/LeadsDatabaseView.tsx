@@ -319,6 +319,38 @@ export function LeadsDatabaseView({
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [dedupReport, setDedupReport] = useState<Record<string, any> | null>(null);
+  const [runningDedup, setRunningDedup] = useState(false);
+
+  async function handleRunDeduplicateScript() {
+    setRunningDedup(true);
+    try {
+      const res = await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "deduplicate_and_disambiguate_leads",
+          payload: {},
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDedupReport(data.report || null);
+        await fetchLeads();
+        await onMutated();
+        const erased = data.report?.erasedCount || 0;
+        const disamb = data.report?.disambiguatedCount || 0;
+        notify(
+          `Script complete: ${erased} duplicate lead(s) erased, ${disamb} colliding number(s) assigned A, B, C codes`,
+          "success"
+        );
+      }
+    } finally {
+      setRunningDedup(false);
+    }
+  }
+
   async function handleToggleBookmark(orgId: string, orgName: string, e?: React.MouseEvent) {
     if (e) e.stopPropagation();
     const res = await fetch("/api/workspace", {
@@ -607,6 +639,17 @@ export function LeadsDatabaseView({
 
           <button
             type="button"
+            disabled={runningDedup}
+            onClick={handleRunDeduplicateScript}
+            title="Erases duplicate leads (same content) and gives A, B, C suffixes (001A, 001B...) when numbers are duplicated with different content"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-surface hover:bg-app-elevated border border-status-warning/50 text-xs font-semibold text-status-warning hover:text-text-primary transition"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {runningDedup ? "Scanning..." : "Clean Duplicates & Code (001A/B/C)"}
+          </button>
+
+          <button
+            type="button"
             disabled={importingFile}
             onClick={() => fileInputRef.current?.click()}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-surface hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent hover:text-text-primary transition"
@@ -638,6 +681,57 @@ export function LeadsDatabaseView({
           </button>
         </div>
       </div>
+
+      {/* DEDUPLICATION & NUMBER COLLISION SCRIPT REPORT BANNER */}
+      {dedupReport && (
+        <div className="bg-app-surface border border-accent/40 rounded-2xl p-4 flex flex-wrap items-start justify-between gap-4 text-xs shadow-sm">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 font-heading font-bold text-text-primary">
+              <Sparkles className="w-4 h-4 text-status-success" />
+              <span>
+                Duplicate &amp; Number Code Script Report — {dedupReport.erasedCount} Duplicate(s) Erased •{" "}
+                {dedupReport.disambiguatedCount} Colliding Number(s) Coded (A, B, C...)
+              </span>
+            </div>
+            <p className="text-text-secondary">
+              Leads with identical content are erased automatically. Leads that share the same number but have different names &amp; details are preserved and given letter suffixes (<span className="font-mono text-accent font-semibold">001A, 001B, 001C...</span>).
+            </p>
+            {Array.isArray(dedupReport.erasedDuplicates) && dedupReport.erasedDuplicates.length > 0 && (
+              <div className="text-status-error font-mono text-[11px]">
+                Erased Duplicates:{" "}
+                {dedupReport.erasedDuplicates
+                  .slice(0, 6)
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .map((d: any) => `${d.name} (${d.reason})`)
+                  .join(" • ")}
+                {dedupReport.erasedDuplicates.length > 6
+                  ? ` +${dedupReport.erasedDuplicates.length - 6} more`
+                  : ""}
+              </div>
+            )}
+            {Array.isArray(dedupReport.disambiguatedLeads) && dedupReport.disambiguatedLeads.length > 0 && (
+              <div className="text-accent font-mono text-[11px]">
+                Assigned A/B/C Codes:{" "}
+                {dedupReport.disambiguatedLeads
+                  .slice(0, 8)
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  .map((c: any) => `#${c.sequenceCode} (${c.name})`)
+                  .join(" • ")}
+                {dedupReport.disambiguatedLeads.length > 8
+                  ? ` +${dedupReport.disambiguatedLeads.length - 8} more`
+                  : ""}
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setDedupReport(null)}
+            className="p-1.5 rounded-lg bg-app-secondary hover:bg-app-elevated text-text-secondary hover:text-text-primary"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ==================================================================== */}
       {/* 1. DAILY SPREADSHEET / DAY SELECTOR BAR ("WHICH DAY DO YOU WANT TO SEE?") */}
