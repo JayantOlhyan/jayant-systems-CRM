@@ -58,7 +58,7 @@ export interface LeadFilterParams {
   sortBy?: "name" | "score" | "createdAt" | "updatedAt" | "country" | "nextFollowUpAt";
   sortDir?: "asc" | "desc";
   page?: number;
-  pageSize?: number;
+  pageSize?: number | "unlimited";
   advancedFilters?: Array<{
     field: string;
     operator:
@@ -411,17 +411,20 @@ export async function queryLeadsPaginated(
   });
 
   const totalCount = filtered.length;
-  const page = Math.max(1, params.page || 1);
-  const pageSize = Math.max(1, Math.min(250, params.pageSize || 50));
-  const offset = (page - 1) * pageSize;
-  const rows = filtered.slice(offset, offset + pageSize);
+  const isUnlimited = params.pageSize === "unlimited" || params.pageSize === 0;
+  const page = isUnlimited ? 1 : Math.max(1, params.page || 1);
+  const numericPageSize = isUnlimited
+    ? Math.max(1, totalCount)
+    : Math.max(1, Number(params.pageSize) || 50);
+  const offset = isUnlimited ? 0 : (page - 1) * numericPageSize;
+  const rows = isUnlimited ? filtered : filtered.slice(offset, offset + numericPageSize);
 
   return {
     rows,
     totalCount,
     page,
-    pageSize,
-    totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+    pageSize: isUnlimited ? "unlimited" : numericPageSize,
+    totalPages: isUnlimited ? 1 : Math.max(1, Math.ceil(totalCount / numericPageSize)),
   };
 }
 
