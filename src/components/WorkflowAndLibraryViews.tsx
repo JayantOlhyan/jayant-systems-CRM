@@ -50,6 +50,7 @@ export function PipelineKanbanView({
 }: PipelineKanbanProps) {
   const [boardMode, setBoardMode] = useState<"opportunities" | "leads">("leads");
   const [search, setSearch] = useState("");
+  const [stagePageSize, setStagePageSize] = useState<50 | 100 | "unlimited">(50);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [showAddOpp, setShowAddOpp] = useState(false);
 
@@ -208,6 +209,28 @@ export function PipelineKanbanView({
             />
           </div>
 
+          <div
+            className="flex items-center gap-1 bg-app-surface px-2.5 py-1 rounded-lg border border-app-border text-xs"
+            role="group"
+            aria-label="Leads per stage limit"
+          >
+            <span className="text-[11px] font-mono text-text-muted mr-1">Per Stage:</span>
+            {([50, 100, "unlimited"] as const).map((opt) => (
+              <button
+                key={String(opt)}
+                type="button"
+                onClick={() => setStagePageSize(opt)}
+                className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                  stagePageSize === opt
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {opt === "unlimited" ? "Unlimited" : opt}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             <button
               type="button"
@@ -247,7 +270,7 @@ export function PipelineKanbanView({
       {/* Kanban Board Columns */}
       <div className="flex gap-4 overflow-x-auto pb-4">
         {stages.map((stg) => {
-          const items =
+          const allStageItems =
             boardMode === "opportunities"
               ? opportunities.filter((opp) => {
                   if (opp.stageId !== stg.id) return false;
@@ -259,17 +282,20 @@ export function PipelineKanbanView({
                     (org?.name || "").toLowerCase().includes(q)
                   );
                 })
-              : organizations
-                  .filter((o) => {
-                    if ((o.primaryStageId || "stg_new") !== stg.id) return false;
-                    if (!search.trim()) return true;
-                    return o.name.toLowerCase().includes(search.toLowerCase());
-                  })
-                  .slice(0, 60);
+              : organizations.filter((o) => {
+                  if ((o.primaryStageId || "stg_new") !== stg.id) return false;
+                  if (!search.trim()) return true;
+                  return o.name.toLowerCase().includes(search.toLowerCase());
+                });
+
+          const items =
+            stagePageSize === "unlimited"
+              ? allStageItems
+              : allStageItems.slice(0, stagePageSize);
 
           const stageConfirmedVal =
             boardMode === "opportunities"
-              ? items.reduce((s, item) => {
+              ? allStageItems.reduce((s, item) => {
                   return item.estimatedValue ? s + Number(item.estimatedValue) : s;
                 }, 0)
               : 0;
@@ -524,7 +550,7 @@ export function PipelineKanbanView({
                   onChange={(e) => setOppOrgId(e.target.value)}
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
-                  {organizations.slice(0, 100).map((o) => (
+                  {organizations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name} ({o.country || "—"})
                     </option>
@@ -659,6 +685,8 @@ export function TasksAndFollowUpsView({
   const [displayMode, setDisplayMode] = useState<"list" | "calendar">(
     initialMode === "calendar" ? "calendar" : "list"
   );
+  const [pageSize, setPageSize] = useState<50 | 100 | "unlimited">(50);
+  const [page, setPage] = useState(1);
   const [showNewTask, setShowNewTask] = useState(false);
 
   const [title, setTitle] = useState("");
@@ -693,6 +721,19 @@ export function TasksAndFollowUpsView({
     if (bucket === "later") return t.dueDate > next7Str;
     return true;
   });
+
+  const taskTotalPages =
+    pageSize === "unlimited"
+      ? 1
+      : Math.max(1, Math.ceil(filteredTasks.length / pageSize));
+  const safeTaskPage = Math.min(page, taskTotalPages);
+  const visibleTasks =
+    pageSize === "unlimited"
+      ? filteredTasks
+      : filteredTasks.slice(
+          (safeTaskPage - 1) * pageSize,
+          safeTaskPage * pageSize
+        );
 
   async function handleToggleTask(id: string) {
     await fetch("/api/workspace", {
@@ -782,7 +823,32 @@ export function TasksAndFollowUpsView({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="flex items-center gap-1 bg-app-surface px-2.5 py-1 rounded-lg border border-app-border text-xs"
+            role="group"
+            aria-label="Tasks per page selector"
+          >
+            <span className="text-[11px] font-mono text-text-muted mr-1">Per Page:</span>
+            {([50, 100, "unlimited"] as const).map((opt) => (
+              <button
+                key={String(opt)}
+                type="button"
+                onClick={() => {
+                  setPageSize(opt);
+                  setPage(1);
+                }}
+                className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                  pageSize === opt
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {opt === "unlimited" ? "Unlimited" : opt}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             <button
               type="button"
@@ -836,7 +902,10 @@ export function TasksAndFollowUpsView({
           <button
             key={tab.id}
             type="button"
-            onClick={() => setBucket(tab.id as typeof bucket)}
+            onClick={() => {
+              setBucket(tab.id as typeof bucket);
+              setPage(1);
+            }}
             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
               bucket === tab.id
                 ? "bg-accent text-white"
@@ -865,14 +934,14 @@ export function TasksAndFollowUpsView({
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
-              {filteredTasks.length === 0 ? (
+              {visibleTasks.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-10 text-center text-text-secondary">
                     No tasks in this queue.
                   </td>
                 </tr>
               ) : (
-                filteredTasks.map((t) => {
+                visibleTasks.map((t) => {
                   const org = orgMap.get(t.organizationId);
                   const isOverdue = t.status !== "Completed" && t.dueDate < todayStr;
                   return (
@@ -1015,6 +1084,31 @@ export function TasksAndFollowUpsView({
               )}
             </tbody>
           </table>
+          {filteredTasks.length > 0 && taskTotalPages > 1 && (
+            <div className="px-4 py-3 border-t border-app-border bg-app-sidebar flex items-center justify-between text-xs">
+              <span className="font-mono text-text-secondary tabular-nums">
+                Showing {visibleTasks.length} of {filteredTasks.length} tasks (Page {safeTaskPage} of {taskTotalPages})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeTaskPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded bg-app-surface border border-app-border disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  disabled={safeTaskPage >= taskTotalPages}
+                  onClick={() => setPage((p) => Math.min(taskTotalPages, p + 1))}
+                  className="px-2.5 py-1 rounded bg-app-surface border border-app-border disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         /* Calendar Schedule Grid */
@@ -1131,7 +1225,7 @@ export function TasksAndFollowUpsView({
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
                   <option value="">None (General Task)</option>
-                  {organizations.slice(0, 100).map((o) => (
+                  {organizations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name}
                     </option>
@@ -1238,6 +1332,7 @@ export function ReferencesAndContentView({
   const [tab, setTab] = useState<"references" | "content">(initialTab);
   const [refCatFilter, setRefCatFilter] = useState("");
   const [contentStatusFilter, setContentStatusFilter] = useState("");
+  const [pageSize, setPageSize] = useState<50 | 100 | "unlimited">(50);
   const [previewImage, setPreviewImage] = useState<{ title: string; url: string } | null>(null);
 
   // Add Reference / Design Inspiration state
@@ -1262,9 +1357,14 @@ export function ReferencesAndContentView({
   const filteredRefs = references.filter(
     (r) => !refCatFilter || r.category === refCatFilter
   );
+  const visibleRefs =
+    pageSize === "unlimited" ? filteredRefs : filteredRefs.slice(0, pageSize);
+
   const filteredIdeas = contentIdeas.filter(
     (c) => !contentStatusFilter || c.status === contentStatusFilter
   );
+  const visibleIdeas =
+    pageSize === "unlimited" ? filteredIdeas : filteredIdeas.slice(0, pageSize);
 
   function handleScreenshotFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -1372,7 +1472,29 @@ export function ReferencesAndContentView({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="flex items-center gap-1 bg-app-surface px-2.5 py-1 rounded-lg border border-app-border text-xs"
+            role="group"
+            aria-label="Items per page selector"
+          >
+            <span className="text-[11px] font-mono text-text-muted mr-1">Per Page:</span>
+            {([50, 100, "unlimited"] as const).map((opt) => (
+              <button
+                key={String(opt)}
+                type="button"
+                onClick={() => setPageSize(opt)}
+                className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                  pageSize === opt
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {opt === "unlimited" ? "Unlimited" : opt}
+              </button>
+            ))}
+          </div>
+
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             <button
               type="button"
@@ -1449,7 +1571,7 @@ export function ReferencesAndContentView({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {filteredRefs.map((ref) => {
+            {visibleRefs.map((ref) => {
               const linkedOrg = orgMap.get(ref.organizationId);
               return (
                 <div
@@ -1621,7 +1743,7 @@ export function ReferencesAndContentView({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredIdeas.map((idea) => {
+            {visibleIdeas.map((idea) => {
               const linkedOrg = orgMap.get(idea.organizationId);
               return (
                 <div
@@ -1835,7 +1957,7 @@ export function ReferencesAndContentView({
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
                   <option value="">None (Standalone Inspiration)</option>
-                  {organizations.slice(0, 100).map((o) => (
+                  {organizations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name}
                     </option>
@@ -1939,7 +2061,7 @@ export function ReferencesAndContentView({
                   className="w-full bg-app-secondary border border-app-border rounded-lg px-3 py-2 text-text-primary"
                 >
                   <option value="">None</option>
-                  {organizations.slice(0, 100).map((o) => (
+                  {organizations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name}
                     </option>
@@ -1993,9 +2115,26 @@ export function ContactsAndSuppressionView({
   notify,
 }: ContactsViewProps) {
   const [subTab, setSubTab] = useState<"contacts" | "suppression">("contacts");
+  const [pageSize, setPageSize] = useState<50 | 100 | "unlimited">(50);
+  const [page, setPage] = useState(1);
   const [dncDomain, setDncDomain] = useState("");
   const [dncReason, setDncReason] = useState("");
   const orgMap = new Map(organizations.map((o) => [o.id, o]));
+
+  const contactTotalPages =
+    pageSize === "unlimited"
+      ? 1
+      : Math.max(1, Math.ceil(contacts.length / pageSize));
+  const safeContactPage = Math.min(page, contactTotalPages);
+  const visibleContacts =
+    pageSize === "unlimited"
+      ? contacts
+      : contacts.slice(
+          (safeContactPage - 1) * pageSize,
+          safeContactPage * pageSize
+        );
+  const visibleSuppressions =
+    pageSize === "unlimited" ? suppressions : suppressions.slice(0, pageSize);
 
   async function handleQuickMessage(
     organizationId: string,
@@ -2052,29 +2191,56 @@ export function ContactsAndSuppressionView({
           </p>
         </div>
 
-        <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
-          <button
-            type="button"
-            onClick={() => setSubTab("contacts")}
-            className={`px-3 py-1.5 rounded-md font-medium ${
-              subTab === "contacts"
-                ? "bg-accent text-white"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="flex items-center gap-1 bg-app-surface px-2.5 py-1 rounded-lg border border-app-border text-xs"
+            role="group"
+            aria-label="Contacts per page selector"
           >
-            Contacts ({contacts.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab("suppression")}
-            className={`px-3 py-1.5 rounded-md font-medium ${
-              subTab === "suppression"
-                ? "bg-status-error text-white"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
-          >
-            Do Not Contact Registry ({suppressions.length})
-          </button>
+            <span className="text-[11px] font-mono text-text-muted mr-1">Per Page:</span>
+            {([50, 100, "unlimited"] as const).map((opt) => (
+              <button
+                key={String(opt)}
+                type="button"
+                onClick={() => {
+                  setPageSize(opt);
+                  setPage(1);
+                }}
+                className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                  pageSize === opt
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {opt === "unlimited" ? "Unlimited" : opt}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
+            <button
+              type="button"
+              onClick={() => setSubTab("contacts")}
+              className={`px-3 py-1.5 rounded-md font-medium ${
+                subTab === "contacts"
+                  ? "bg-accent text-white"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Contacts ({contacts.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubTab("suppression")}
+              className={`px-3 py-1.5 rounded-md font-medium ${
+                subTab === "suppression"
+                  ? "bg-status-error text-white"
+                  : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              Do Not Contact Registry ({suppressions.length})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2092,7 +2258,7 @@ export function ContactsAndSuppressionView({
               </tr>
             </thead>
             <tbody className="divide-y divide-app-border">
-              {contacts.map((c) => {
+              {visibleContacts.map((c) => {
                 const org = orgMap.get(c.organizationId);
                 return (
                   <tr key={c.id} className="hover:bg-app-secondary/50">
@@ -2172,6 +2338,31 @@ export function ContactsAndSuppressionView({
               })}
             </tbody>
           </table>
+          {contacts.length > 0 && contactTotalPages > 1 && (
+            <div className="px-4 py-3 border-t border-app-border bg-app-sidebar flex items-center justify-between text-xs">
+              <span className="font-mono text-text-secondary tabular-nums">
+                Showing {visibleContacts.length} of {contacts.length} contacts (Page {safeContactPage} of {contactTotalPages})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeContactPage <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded bg-app-surface border border-app-border disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  disabled={safeContactPage >= contactTotalPages}
+                  onClick={() => setPage((p) => Math.min(contactTotalPages, p + 1))}
+                  className="px-2.5 py-1 rounded bg-app-surface border border-app-border disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2183,13 +2374,13 @@ export function ContactsAndSuppressionView({
             <p className="text-xs text-text-secondary">
               Note: An empty or partial suppression list never implies affirmative outreach permission. All 200 imported ledger leads retain their explicit <code className="font-mono">not approved</code> outreach status until manually reviewed.
             </p>
-            {suppressions.length === 0 ? (
+            {visibleSuppressions.length === 0 ? (
               <div className="p-6 text-center bg-app-secondary rounded-lg text-xs text-text-muted">
                 No domains or contacts currently in the Do Not Contact exclusion list.
               </div>
             ) : (
               <div className="space-y-2">
-                {suppressions.map((s) => (
+                {visibleSuppressions.map((s) => (
                   <div
                     key={s.id}
                     className="p-3 rounded-lg bg-app-secondary border border-status-error/30 flex items-center justify-between text-xs"
@@ -2286,6 +2477,21 @@ export function AnalyticsAndActivityView({
 }: AnalyticsViewProps) {
   const [mode, setMode] = useState<"analytics" | "activity">(initialMode);
   const [dateRange, setDateRange] = useState("all");
+  const [activityPageSize, setActivityPageSize] = useState<50 | 100 | "unlimited">(50);
+  const [activityPage, setActivityPage] = useState(1);
+
+  const activityTotalPages =
+    activityPageSize === "unlimited"
+      ? 1
+      : Math.max(1, Math.ceil(activities.length / activityPageSize));
+  const safeActivityPage = Math.min(activityPage, activityTotalPages);
+  const visibleActivities =
+    activityPageSize === "unlimited"
+      ? activities
+      : activities.slice(
+          (safeActivityPage - 1) * activityPageSize,
+          safeActivityPage * activityPageSize
+        );
 
   // Compute real metrics from actual database records (Section 21)
   const totalLeads = organizations.length;
@@ -2335,7 +2541,34 @@ export function AnalyticsAndActivityView({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {mode === "activity" && (
+            <div
+              className="flex items-center gap-1 bg-app-surface px-2.5 py-1 rounded-lg border border-app-border text-xs"
+              role="group"
+              aria-label="Activities per page selector"
+            >
+              <span className="text-[11px] font-mono text-text-muted mr-1">Per Page:</span>
+              {([50, 100, "unlimited"] as const).map((opt) => (
+                <button
+                  key={String(opt)}
+                  type="button"
+                  onClick={() => {
+                    setActivityPageSize(opt);
+                    setActivityPage(1);
+                  }}
+                  className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                    activityPageSize === opt
+                      ? "bg-accent text-white"
+                      : "text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {opt === "unlimited" ? "Unlimited" : opt}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center bg-app-surface p-1 rounded-lg border border-app-border text-xs">
             <button
               type="button"
@@ -2568,7 +2801,7 @@ export function AnalyticsAndActivityView({
         </div>
       ) : (
         <div className="bg-app-surface border border-app-border rounded-xl p-5 space-y-2.5">
-          {activities.map((a) => (
+          {visibleActivities.map((a) => (
             <div
               key={a.id}
               className="p-3.5 rounded-lg bg-app-secondary border border-app-border flex items-center justify-between text-xs"
@@ -2587,6 +2820,31 @@ export function AnalyticsAndActivityView({
               </div>
             </div>
           ))}
+          {activities.length > 0 && activityTotalPages > 1 && (
+            <div className="pt-3 border-t border-app-border flex items-center justify-between text-xs">
+              <span className="font-mono text-text-secondary tabular-nums">
+                Showing {visibleActivities.length} of {activities.length} activities (Page {safeActivityPage} of {activityTotalPages})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={safeActivityPage <= 1}
+                  onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                  className="px-2.5 py-1 rounded bg-app-secondary border border-app-border disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  disabled={safeActivityPage >= activityTotalPages}
+                  onClick={() => setActivityPage((p) => Math.min(activityTotalPages, p + 1))}
+                  className="px-2.5 py-1 rounded bg-app-secondary border border-app-border disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
