@@ -60,7 +60,11 @@ export async function GET(req: NextRequest) {
 
     if (view === "leads_paginated") {
       const page = Number(searchParams.get("page") || "1");
-      const pageSize = Number(searchParams.get("pageSize") || "50");
+      const rawPageSize = (searchParams.get("pageSize") || "50").toLowerCase();
+      const pageSize =
+        rawPageSize === "unlimited" || rawPageSize === "all" || rawPageSize === "0"
+          ? "unlimited"
+          : Number(rawPageSize || "50");
       const result = await queryLeadsPaginated(
         {
           search: searchParams.get("search") || undefined,
