@@ -693,9 +693,11 @@ export function LeadProfileModal({
     (f) => !f.collectionId || memberCollectionIds.includes(f.collectionId)
   );
 
-  const displaySeqNumber = formatLeadSequenceNumber(
-    currentIdx !== -1 ? currentIdx + 1 : org.daySequenceNumber || org.sequenceNumber || 1
-  );
+  const displaySeqNumber =
+    org.sequenceCode ||
+    `${formatLeadSequenceNumber(
+      currentIdx !== -1 ? currentIdx + 1 : org.daySequenceNumber || org.sequenceNumber || 1
+    )}${org.codeSuffix || ""}`;
 
   const availableCategoryNames = Array.from(
     new Set([
