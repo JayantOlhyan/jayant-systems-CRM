@@ -98,6 +98,9 @@ export function ImportCenterView({
     "all" | "new" | "exact_match" | "warnings" | "directory_only"
   >("all");
   const [previewSearch, setPreviewSearch] = useState("");
+  const [previewPageSize, setPreviewPageSize] = useState<50 | 100 | "unlimited">(50);
+  const [previewPage, setPreviewPage] = useState(1);
+  const [historyPageSize, setHistoryPageSize] = useState<50 | 100 | "unlimited">(50);
   const [completedBatch, setCompletedBatch] = useState<ImportBatchRecord | null>(null);
   const [newCustomFieldName, setNewCustomFieldName] = useState("");
   const [templateName, setTemplateName] = useState("");
@@ -923,107 +926,211 @@ export function ImportCenterView({
                     ))}
                   </div>
 
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-text-muted absolute left-2.5 top-2" />
-                    <input
-                      type="text"
-                      placeholder="Filter preview rows..."
-                      value={previewSearch}
-                      onChange={(e) => setPreviewSearch(e.target.value)}
-                      className="bg-app-secondary border border-app-border rounded-lg pl-8 pr-3 py-1 text-xs text-text-primary"
-                    />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div
+                      className="flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg p-1 text-xs font-mono"
+                      role="group"
+                      aria-label="Preview rows per page"
+                    >
+                      <span className="px-1.5 text-[10px] uppercase text-text-muted">
+                        Per Page:
+                      </span>
+                      {(
+                        [
+                          { value: 50, label: "50" },
+                          { value: 100, label: "100" },
+                          { value: "unlimited", label: "Unlimited" },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={String(opt.value)}
+                          type="button"
+                          onClick={() => {
+                            setPreviewPageSize(opt.value);
+                            setPreviewPage(1);
+                          }}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-semibold tabular-nums transition ${
+                            previewPageSize === opt.value
+                              ? "bg-accent text-white"
+                              : "text-text-secondary hover:text-text-primary"
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-text-muted absolute left-2.5 top-2" />
+                      <input
+                        type="text"
+                        placeholder="Filter preview rows..."
+                        value={previewSearch}
+                        onChange={(e) => {
+                          setPreviewSearch(e.target.value);
+                          setPreviewPage(1);
+                        }}
+                        className="bg-app-secondary border border-app-border rounded-lg pl-8 pr-3 py-1 text-xs text-text-primary"
+                      />
+                    </div>
                   </div>
                 </div>
 
                 {/* Preview Table */}
-                <div className="overflow-x-auto max-h-80 border border-app-border rounded-lg">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-app-secondary text-text-muted font-mono uppercase sticky top-0">
-                      <tr>
-                        <th className="py-2 px-3">Row</th>
-                        <th className="py-2 px-3">Match Status</th>
-                        <th className="py-2 px-3">Lead ID</th>
-                        <th className="py-2 px-3">Business</th>
-                        <th className="py-2 px-3">Website</th>
-                        <th className="py-2 px-3">Country</th>
-                        <th className="py-2 px-3">Source Status</th>
-                        <th className="py-2 px-3">Verification Level</th>
-                        <th className="py-2 px-3">Validation / Evidence Warnings</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-app-border">
-                      {filteredPreviewRows.slice(0, 100).map((r) => (
-                        <tr key={r.rowNumber} className="hover:bg-app-secondary/50">
-                          <td className="py-2 px-3 font-mono text-text-muted">#{r.rowNumber}</td>
-                          <td className="py-2 px-3">
-                            <span
-                              className={`inline-block px-2 py-0.5 rounded font-mono text-[10px] uppercase ${
-                                r.status === "new"
-                                  ? "bg-status-success/15 text-status-success"
-                                  : r.status === "exact_match"
-                                  ? "bg-status-info/15 text-status-info"
-                                  : r.status === "conflict"
-                                  ? "bg-status-warning/15 text-status-warning"
-                                  : "bg-status-error/15 text-status-error"
-                              }`}
-                            >
-                              {r.status.replace("_", " ")}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-mono text-text-secondary">
-                            {r.mappedData.externalId || "—"}
-                          </td>
-                          <td className="py-2 px-3 font-medium text-text-primary">
-                            {r.mappedData.name}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-text-secondary">
-                            {r.mappedData.normalizedDomain || "— (Missing)"}
-                          </td>
-                          <td className="py-2 px-3 text-text-secondary">
-                            {r.mappedData.country || "—"}
-                          </td>
-                          <td className="py-2 px-3 font-mono text-text-secondary">
-                            {r.mappedData.sourceLeadStatus}
-                          </td>
-                          <td className="py-2 px-3">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[11px] font-mono ${
-                                r.mappedData.verificationLevel
-                                  .toLowerCase()
-                                  .includes("directory")
-                                  ? "bg-status-warning/15 text-status-warning"
-                                  : "bg-status-success/15 text-status-success"
-                              }`}
-                            >
-                              {r.mappedData.verificationLevel}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3">
-                            {r.warnings.length > 0 ? (
-                              <div className="space-y-1">
-                                {r.warnings.map((w, idx) => (
-                                  <div
-                                    key={idx}
-                                    className="text-[11px] text-status-warning flex items-start gap-1"
+                {(() => {
+                  const totalFiltered = filteredPreviewRows.length;
+                  const numericSize =
+                    previewPageSize === "unlimited"
+                      ? Math.max(1, totalFiltered)
+                      : previewPageSize;
+                  const totalPreviewPages =
+                    previewPageSize === "unlimited"
+                      ? 1
+                      : Math.max(1, Math.ceil(totalFiltered / numericSize));
+                  const safePage = Math.min(previewPage, totalPreviewPages);
+                  const visiblePreviewRows =
+                    previewPageSize === "unlimited"
+                      ? filteredPreviewRows
+                      : filteredPreviewRows.slice(
+                          (safePage - 1) * numericSize,
+                          safePage * numericSize
+                        );
+
+                  return (
+                    <>
+                      <div className="overflow-x-auto max-h-[480px] border border-app-border rounded-lg">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-app-secondary text-text-muted font-mono uppercase sticky top-0">
+                            <tr>
+                              <th className="py-2 px-3">Row</th>
+                              <th className="py-2 px-3">Match Status</th>
+                              <th className="py-2 px-3">Lead ID</th>
+                              <th className="py-2 px-3">Business</th>
+                              <th className="py-2 px-3">Website</th>
+                              <th className="py-2 px-3">Country</th>
+                              <th className="py-2 px-3">Source Status</th>
+                              <th className="py-2 px-3">Verification Level</th>
+                              <th className="py-2 px-3">Validation / Evidence Warnings</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-app-border">
+                            {visiblePreviewRows.map((r) => (
+                              <tr key={r.rowNumber} className="hover:bg-app-secondary/50">
+                                <td className="py-2 px-3 font-mono text-text-muted">
+                                  #{r.rowNumber}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span
+                                    className={`inline-block px-2 py-0.5 rounded font-mono text-[10px] uppercase ${
+                                      r.status === "new"
+                                        ? "bg-status-success/15 text-status-success"
+                                        : r.status === "exact_match"
+                                        ? "bg-status-info/15 text-status-info"
+                                        : r.status === "conflict"
+                                        ? "bg-status-warning/15 text-status-warning"
+                                        : "bg-status-error/15 text-status-error"
+                                    }`}
                                   >
-                                    <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                                    <span>
-                                      <strong>{w.field}</strong> ({w.value}): {w.message}
+                                    {r.status.replace("_", " ")}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 font-mono text-text-secondary">
+                                  {r.mappedData.externalId || "—"}
+                                </td>
+                                <td className="py-2 px-3 font-medium text-text-primary">
+                                  {r.mappedData.name}
+                                </td>
+                                <td className="py-2 px-3 font-mono text-text-secondary">
+                                  {r.mappedData.normalizedDomain || "— (Missing)"}
+                                </td>
+                                <td className="py-2 px-3 text-text-secondary">
+                                  {r.mappedData.country || "—"}
+                                </td>
+                                <td className="py-2 px-3 font-mono text-text-secondary">
+                                  {r.mappedData.sourceLeadStatus}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[11px] font-mono ${
+                                      r.mappedData.verificationLevel
+                                        .toLowerCase()
+                                        .includes("directory")
+                                        ? "bg-status-warning/15 text-status-warning"
+                                        : "bg-status-success/15 text-status-success"
+                                    }`}
+                                  >
+                                    {r.mappedData.verificationLevel}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3">
+                                  {r.warnings.length > 0 ? (
+                                    <div className="space-y-1">
+                                      {r.warnings.map((w, idx) => (
+                                        <div
+                                          key={idx}
+                                          className="text-[11px] text-status-warning flex items-start gap-1"
+                                        >
+                                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                                          <span>
+                                            <strong>{w.field}</strong> ({w.value}): {w.message}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-status-success font-mono text-[11px]">
+                                      Verified OK
                                     </span>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-status-success font-mono text-[11px]">
-                                Verified OK
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      {/* Preview Pagination Footer */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-text-secondary">
+                        <span>
+                          Showing{" "}
+                          <strong className="font-mono text-text-primary tabular-nums">
+                            {visiblePreviewRows.length}
+                          </strong>{" "}
+                          of{" "}
+                          <strong className="font-mono text-text-primary tabular-nums">
+                            {totalFiltered}
+                          </strong>{" "}
+                          preview rows
+                        </span>
+                        {totalPreviewPages > 1 && (
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <button
+                              type="button"
+                              disabled={safePage <= 1}
+                              onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                              className="px-2.5 py-1 rounded bg-app-secondary border border-app-border disabled:opacity-40"
+                            >
+                              Prev
+                            </button>
+                            <span>
+                              Page {safePage} of {totalPreviewPages}
+                            </span>
+                            <button
+                              type="button"
+                              disabled={safePage >= totalPreviewPages}
+                              onClick={() =>
+                                setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))
+                              }
+                              className="px-2.5 py-1 rounded bg-app-secondary border border-app-border disabled:opacity-40"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
 
                 <div className="flex items-center justify-between pt-4 border-t border-app-border">
                   <button
@@ -1155,12 +1262,53 @@ export function ImportCenterView({
       {/* SUBTAB: IMPORT HISTORY */}
       {subTab === "history" && (
         <div className="space-y-4">
+          {importBatches.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-app-surface border border-app-border rounded-xl p-3 text-xs">
+              <span className="text-text-secondary">
+                Total Import Batches:{" "}
+                <strong className="font-mono text-text-primary tabular-nums">
+                  {importBatches.length}
+                </strong>
+              </span>
+              <div
+                className="flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg p-1 font-mono"
+                role="group"
+                aria-label="Import batches per page"
+              >
+                <span className="px-1.5 text-[10px] uppercase text-text-muted">Per Page:</span>
+                {(
+                  [
+                    { value: 50, label: "50" },
+                    { value: 100, label: "100" },
+                    { value: "unlimited", label: "Unlimited" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={String(opt.value)}
+                    type="button"
+                    onClick={() => setHistoryPageSize(opt.value)}
+                    className={`px-2 py-0.5 rounded-md text-[11px] font-semibold tabular-nums transition ${
+                      historyPageSize === opt.value
+                        ? "bg-accent text-white"
+                        : "text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {importBatches.length === 0 ? (
             <div className="bg-app-surface border border-app-border rounded-xl p-8 text-center">
               <p className="text-sm text-text-secondary">No spreadsheet imports recorded yet.</p>
             </div>
           ) : (
-            importBatches.map((b) => (
+            (historyPageSize === "unlimited"
+              ? importBatches
+              : importBatches.slice(0, historyPageSize)
+            ).map((b) => (
               <div
                 key={b.id}
                 className="bg-app-surface border border-app-border rounded-xl p-5 space-y-4"
