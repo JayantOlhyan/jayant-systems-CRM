@@ -408,7 +408,7 @@ function formatFullWorkspaceResponse(state: LocalWorkspaceDB) {
     contacts: state.contacts,
     tasks: state.tasks,
     notes: state.notes,
-    activities: state.activities.slice(0, 120),
+    activities: state.activities,
     references: state.references,
     contentIdeas: state.contentIdeas,
     importBatches: state.importBatches,
@@ -436,7 +436,9 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
   const sortBy = searchParams.get("sortBy") || "sequenceNumber";
   const sortDir = searchParams.get("sortDir") || "asc";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
-  const pageSize = Math.max(1, Math.min(5000, Number(searchParams.get("pageSize") || "50")));
+  const rawPageSize = (searchParams.get("pageSize") || "50").toLowerCase();
+  const isUnlimited =
+    rawPageSize === "unlimited" || rawPageSize === "all" || rawPageSize === "0";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orgToMems = new Map<string, Array<Record<string, any>>>();
@@ -715,15 +717,21 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
   });
 
   const totalCount = numberedFiltered.length;
-  const offset = (page - 1) * pageSize;
-  const rows = numberedFiltered.slice(offset, offset + pageSize);
+  const numericPageSize = isUnlimited
+    ? Math.max(1, totalCount)
+    : Math.max(1, Number(rawPageSize) || 50);
+  const effectivePage = isUnlimited ? 1 : page;
+  const offset = isUnlimited ? 0 : (effectivePage - 1) * numericPageSize;
+  const rows = isUnlimited
+    ? numberedFiltered
+    : numberedFiltered.slice(offset, offset + numericPageSize);
 
   return {
     rows,
     totalCount,
-    page,
-    pageSize,
-    totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+    page: effectivePage,
+    pageSize: isUnlimited ? "unlimited" : numericPageSize,
+    totalPages: isUnlimited ? 1 : Math.max(1, Math.ceil(totalCount / numericPageSize)),
     availableDays,
     availableCategories,
   };
