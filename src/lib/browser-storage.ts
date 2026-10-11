@@ -202,6 +202,70 @@ function saveToIndexedDB(dbState: LocalWorkspaceDB): void {
   }
 }
 
+export function formatLeadSequenceNumber(n: number): string {
+  const safeNum = Math.max(1, Math.floor(Number(n) || 1));
+  return String(safeNum).padStart(3, "0");
+}
+
+function normalizeLeadNumberingAndDays(state: LocalWorkspaceDB): boolean {
+  let mutated = false;
+  if (!Array.isArray(state.days)) {
+    state.days = [];
+    mutated = true;
+  }
+  if (!Array.isArray(state.categories)) {
+    state.categories = [];
+    mutated = true;
+  }
+
+  const todayIsoDate = new Date().toISOString().slice(0, 10);
+
+  // Order oldest -> newest so sequential numbers 001, 002, ... stay stable
+  const chronological = [...state.organizations].reverse();
+  const perDayCounters: Record<string, number> = {};
+  let maxGlobalSeq = 0;
+
+  for (const org of chronological) {
+    if (typeof org.sequenceNumber === "number" && org.sequenceNumber > maxGlobalSeq) {
+      maxGlobalSeq = org.sequenceNumber;
+    }
+  }
+
+  for (const org of chronological) {
+    const resolvedDay =
+      org.dayKey ||
+      org.discoveryDate ||
+      (org.createdAt ? String(org.createdAt).slice(0, 10) : todayIsoDate);
+
+    if (org.dayKey !== resolvedDay) {
+      org.dayKey = resolvedDay;
+      if (!org.discoveryDate) org.discoveryDate = resolvedDay;
+      mutated = true;
+    }
+
+    if (typeof org.sequenceNumber !== "number" || org.sequenceNumber < 1) {
+      maxGlobalSeq += 1;
+      org.sequenceNumber = maxGlobalSeq;
+      mutated = true;
+    }
+
+    perDayCounters[resolvedDay] = (perDayCounters[resolvedDay] || 0) + 1;
+    if (typeof org.daySequenceNumber !== "number" || org.daySequenceNumber < 1) {
+      org.daySequenceNumber = perDayCounters[resolvedDay];
+      mutated = true;
+    } else if (org.daySequenceNumber > perDayCounters[resolvedDay]) {
+      perDayCounters[resolvedDay] = org.daySequenceNumber;
+    }
+
+    if (!Array.isArray(org.categories)) {
+      org.categories = org.industry ? [org.industry] : [];
+      mutated = true;
+    }
+  }
+
+  return mutated;
+}
+
 export function loadLocalBrowserDB(): LocalWorkspaceDB {
   if (typeof window === "undefined") {
     return buildDefaultLocalBrowserDB();
@@ -220,6 +284,7 @@ export function loadLocalBrowserDB(): LocalWorkspaceDB {
         const hasUserDesignInspiration = parsed.references.some(
           (r) => r.id === "ref_user_design_inspiration_1"
         );
+        let shouldSave = false;
         if (!hasUserDesignInspiration) {
           parsed.references.unshift({
             id: "ref_user_design_inspiration_1",
@@ -234,6 +299,12 @@ export function loadLocalBrowserDB(): LocalWorkspaceDB {
             organizationId: null,
             createdAt: new Date().toISOString(),
           });
+          shouldSave = true;
+        }
+        if (normalizeLeadNumberingAndDays(parsed)) {
+          shouldSave = true;
+        }
+        if (shouldSave) {
           saveLocalBrowserDB(parsed);
         }
         return parsed;
@@ -244,6 +315,7 @@ export function loadLocalBrowserDB(): LocalWorkspaceDB {
   }
 
   const initial = buildDefaultLocalBrowserDB();
+  normalizeLeadNumberingAndDays(initial);
   saveLocalBrowserDB(initial);
   return initial;
 }
@@ -315,6 +387,7 @@ function formatFullWorkspaceResponse(state: LocalWorkspaceDB) {
         leadCount: collectionCounts[c.id] || 0,
       })),
     categories: state.categories,
+    days: state.days || [],
     tags: state.tags,
     fieldDefinitions: state.fieldDefinitions.filter((f) => !f.archivedAt),
     pipelines: state.pipelines,
@@ -341,6 +414,7 @@ function formatFullWorkspaceResponse(state: LocalWorkspaceDB) {
 function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSearchParams) {
   const includeArchived = searchParams.get("includeArchived") === "true";
   const collectionId = searchParams.get("collectionId") || undefined;
+  const day = searchParams.get("day") || undefined;
   const search = searchParams.get("search") || undefined;
   const market = searchParams.get("market") || undefined;
   const country = searchParams.get("country") || undefined;
@@ -352,8 +426,8 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
   const tag = searchParams.get("tag") || undefined;
   const minScore = searchParams.get("minScore") ? Number(searchParams.get("minScore")) : undefined;
   const hasWarning = searchParams.get("hasWarning") === "true";
-  const sortBy = searchParams.get("sortBy") || "updatedAt";
-  const sortDir = searchParams.get("sortDir") || "desc";
+  const sortBy = searchParams.get("sortBy") || "sequenceNumber";
+  const sortDir = searchParams.get("sortDir") || "asc";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const pageSize = Math.max(1, Math.min(5000, Number(searchParams.get("pageSize") || "50")));
 
@@ -366,15 +440,20 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let filtered: Array<Record<string, any>> = state.organizations
+  let baseCollectionOrgs: Array<Record<string, any>> = state.organizations
     .filter((o) => (includeArchived ? true : !o.archivedAt))
     .map((org) => {
       const mems = orgToMems.get(org.id) || [];
       const activeMembership = collectionId
         ? mems.find((m) => m.collectionId === collectionId)
         : undefined;
+      const dayKey =
+        org.dayKey ||
+        org.discoveryDate ||
+        (org.createdAt ? String(org.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10));
       return {
         ...org,
+        dayKey,
         collectionIds: mems.map((m) => m.collectionId),
         collectionCategories: activeMembership?.collectionCategories || org.categories || [],
         effectiveScore: activeMembership?.score ?? org.score,
@@ -386,8 +465,134 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     });
 
   if (collectionId) {
-    filtered = filtered.filter((o) => o.collectionIds.includes(collectionId));
+    baseCollectionOrgs = baseCollectionOrgs.filter((o) => o.collectionIds.includes(collectionId));
   }
+
+  // Build availableDays summary (numbered 001, 002, 003... till infinity)
+  const dayMap = new Map<
+    string,
+    {
+      dayKey: string;
+      label: string;
+      leadCount: number;
+      spreadsheets: string[];
+      categories: Set<string>;
+    }
+  >();
+
+  for (const d of state.days || []) {
+    if (!d.dayKey) continue;
+    dayMap.set(d.dayKey, {
+      dayKey: d.dayKey,
+      label: d.label || `Daily Spreadsheet (${d.dayKey})`,
+      leadCount: 0,
+      spreadsheets: [],
+      categories: new Set<string>(),
+    });
+  }
+
+  for (const b of state.importBatches || []) {
+    if (b.status === "rolled_back") continue;
+    if (collectionId && b.collectionId && b.collectionId !== collectionId) continue;
+    const bDay =
+      b.dayKey || (b.createdAt ? String(b.createdAt).slice(0, 10) : new Date().toISOString().slice(0, 10));
+    const entry = dayMap.get(bDay) || {
+      dayKey: bDay,
+      label: String(b.filename || `Spreadsheet (${bDay})`),
+      leadCount: 0,
+      spreadsheets: [] as string[],
+      categories: new Set<string>(),
+    };
+    const fname = b.filename ? String(b.filename) : "";
+    if (fname && !entry.spreadsheets.includes(fname)) {
+      entry.spreadsheets.push(fname);
+      if (entry.label.startsWith("Daily Spreadsheet") || entry.label.startsWith("Spreadsheet")) {
+        entry.label = fname;
+      }
+    }
+    dayMap.set(bDay, entry);
+  }
+
+  for (const o of baseCollectionOrgs) {
+    const dk = o.dayKey;
+    const entry = dayMap.get(dk) || {
+      dayKey: dk,
+      label: `Spreadsheet (${dk})`,
+      leadCount: 0,
+      spreadsheets: [] as string[],
+      categories: new Set<string>(),
+    };
+    entry.leadCount += 1;
+    const primaryCat = o.categories?.[0] || o.industry;
+    if (primaryCat) entry.categories.add(String(primaryCat));
+    dayMap.set(dk, entry);
+  }
+
+  const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.dayKey.localeCompare(b.dayKey));
+  const availableDays = sortedDays.map((d, idx) => ({
+    dayKey: d.dayKey,
+    dayNumber: idx + 1,
+    formattedDayNumber: formatLeadSequenceNumber(idx + 1),
+    label: d.label,
+    leadCount: d.leadCount,
+    spreadsheets: d.spreadsheets,
+    categories: Array.from(d.categories),
+  }));
+
+  // Filter by selected Day if specified
+  let filtered = day
+    ? baseCollectionOrgs.filter((o) => o.dayKey === day)
+    : [...baseCollectionOrgs];
+
+  // Build availableCategories summary for the active Day (or All Days), numbered 001, 002, 003...
+  const catMap = new Map<
+    string,
+    { id: string | null; name: string; color: string; leadCount: number }
+  >();
+
+  for (const c of state.categories || []) {
+    if (collectionId && c.collectionId && c.collectionId !== collectionId) continue;
+    const key = String(c.name || "").trim().toLowerCase();
+    if (!key) continue;
+    catMap.set(key, {
+      id: c.id || null,
+      name: String(c.name).trim(),
+      color: c.color || "#7958F5",
+      leadCount: 0,
+    });
+  }
+
+  for (const o of filtered) {
+    const orgCats = new Set<string>();
+    if (o.industry && String(o.industry).trim()) orgCats.add(String(o.industry).trim());
+    for (const cName of o.categories || []) {
+      if (cName && String(cName).trim()) orgCats.add(String(cName).trim());
+    }
+    for (const cName of o.collectionCategories || []) {
+      if (cName && String(cName).trim()) orgCats.add(String(cName).trim());
+    }
+    for (const cName of orgCats) {
+      const key = cName.toLowerCase();
+      const existing = catMap.get(key);
+      if (existing) {
+        existing.leadCount += 1;
+      } else {
+        catMap.set(key, {
+          id: null,
+          name: cName,
+          color: "#7958F5",
+          leadCount: 1,
+        });
+      }
+    }
+  }
+
+  const availableCategories = Array.from(catMap.values()).map((c, idx) => ({
+    ...c,
+    categoryNumber: idx + 1,
+    formattedCategoryNumber: formatLeadSequenceNumber(idx + 1),
+  }));
+
   if (search && search.trim()) {
     const q = search.trim().toLowerCase();
     filtered = filtered.filter(
@@ -398,6 +603,8 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
         (o.country || "").toLowerCase().includes(q) ||
         (o.industry || "").toLowerCase().includes(q) ||
         (o.externalId || "").toLowerCase().includes(q) ||
+        formatLeadSequenceNumber(o.sequenceNumber || 1).includes(q) ||
+        formatLeadSequenceNumber(o.daySequenceNumber || 1).includes(q) ||
         (o.observedFacts || "").toLowerCase().includes(q) ||
         (o.publishedContact || "").toLowerCase().includes(q) ||
         (o.tags || []).some((t: string) => t.toLowerCase().includes(q)) ||
@@ -454,7 +661,11 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
 
   filtered.sort((a, b) => {
     let cmp = 0;
-    if (sortBy === "name") {
+    if (sortBy === "sequenceNumber") {
+      const seqA = day ? (a.daySequenceNumber ?? a.sequenceNumber ?? 1) : (a.sequenceNumber ?? 1);
+      const seqB = day ? (b.daySequenceNumber ?? b.sequenceNumber ?? 1) : (b.sequenceNumber ?? 1);
+      cmp = seqA - seqB;
+    } else if (sortBy === "name") {
       cmp = (a.name || "").localeCompare(b.name || "");
     } else if (sortBy === "score") {
       cmp = (a.effectiveScore ?? -1) - (b.effectiveScore ?? -1);
@@ -465,12 +676,25 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     } else {
       cmp = new Date(a.updatedAt || 0).getTime() - new Date(b.updatedAt || 0).getTime();
     }
+    if (cmp === 0) {
+      cmp = (a.sequenceNumber ?? 1) - (b.sequenceNumber ?? 1);
+    }
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const totalCount = filtered.length;
+  // Number every lead in the sorted list sequentially: 001, 002, 003 ... till Infinity
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const numberedFiltered: Array<Record<string, any>> = filtered.map((item, idx) => ({
+    ...item,
+    sortedRank: idx + 1,
+    displayNumber: formatLeadSequenceNumber(idx + 1),
+    formattedSequenceNumber: formatLeadSequenceNumber(item.sequenceNumber || idx + 1),
+    formattedDaySequenceNumber: formatLeadSequenceNumber(item.daySequenceNumber || idx + 1),
+  }));
+
+  const totalCount = numberedFiltered.length;
   const offset = (page - 1) * pageSize;
-  const rows = filtered.slice(offset, offset + pageSize);
+  const rows = numberedFiltered.slice(offset, offset + pageSize);
 
   return {
     rows,
@@ -478,6 +702,8 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(totalCount / pageSize)),
+    availableDays,
+    availableCategories,
   };
 }
 
@@ -927,6 +1153,7 @@ export function installLocalBrowserStorageInterceptor(): void {
       if (method === "GET") {
         const view = parsedUrl.searchParams.get("view") || "full";
         if (view === "lead_detail") {
+          normalizeLeadNumberingAndDays(state);
           const id = parsedUrl.searchParams.get("id");
           const org = state.organizations.find((o) => o.id === id);
           if (!org) return jsonResponse({ error: "Lead not found" }, 404);
@@ -945,6 +1172,7 @@ export function installLocalBrowserStorageInterceptor(): void {
             stageHistory: state.stageHistory.filter((h) => h.organizationId === id),
             references: state.references.filter((r) => r.organizationId === id),
             contentIdeas: state.contentIdeas.filter((c) => c.organizationId === id),
+            categoryTrees: state.categories || [],
           });
         }
 
@@ -1043,6 +1271,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 }
               }
 
+              normalizeLeadNumberingAndDays(state);
               saveLocalBrowserDB(state);
               return jsonResponse({ ok: true, id: targetId });
             }
@@ -1051,11 +1280,35 @@ export function installLocalBrowserStorageInterceptor(): void {
             const newId = uid("org");
             const evCheck = validateUrlField(updates.contactEvidenceUrl, "Contact Evidence URL");
             const normDomain = updates.websiteUrl ? normalizeDomain(updates.websiteUrl) : null;
+            const resolvedDayKey = updates.dayKey || updates.discoveryDate || nowIso.split("T")[0];
+            const maxGlobalSeq = state.organizations.reduce(
+              (acc, o) => Math.max(acc, typeof o.sequenceNumber === "number" ? o.sequenceNumber : 0),
+              0
+            );
+            const maxDaySeq = state.organizations
+              .filter((o) => (o.dayKey || o.discoveryDate) === resolvedDayKey)
+              .reduce(
+                (acc, o) =>
+                  Math.max(acc, typeof o.daySequenceNumber === "number" ? o.daySequenceNumber : 0),
+                0
+              );
+
+            const initialCategories = Array.isArray(updates.categories)
+              ? updates.categories
+              : updates.category
+              ? [String(updates.category).trim()]
+              : updates.industry
+              ? [String(updates.industry).trim()]
+              : [];
+
             const newOrg = {
               id: newId,
               workspaceId: DEFAULT_WORKSPACE_ID,
               externalId: null,
-              discoveryDate: nowIso.split("T")[0],
+              dayKey: resolvedDayKey,
+              discoveryDate: resolvedDayKey,
+              sequenceNumber: maxGlobalSeq + 1,
+              daySequenceNumber: maxDaySeq + 1,
               name: String(updates.name || "Untitled Business").trim(),
               normalizedName: normalizeOrganizationName(updates.name || "Untitled Business"),
               websiteUrl: updates.websiteUrl || null,
@@ -1069,7 +1322,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                   : updates.country
                   ? "International"
                   : "India"),
-              industry: updates.industry || null,
+              industry: updates.industry || initialCategories[0] || null,
               description: updates.description || null,
               observedFacts: updates.observedFacts || null,
               publishedContact: updates.publishedContact || null,
@@ -1085,8 +1338,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 updates.verificationLevel || (normDomain ? "site description" : "unverified"),
               primaryPipelineId: DEFAULT_PIPELINE_ID,
               primaryStageId: updates.primaryStageId || "stg_new",
-              categories:
-                updates.categories || (updates.industry ? [updates.industry] : []),
+              categories: initialCategories,
               tags: updates.tags || [],
               score: updates.score ?? null,
               scoreIsManual: updates.score !== undefined && updates.score !== null,
@@ -1137,7 +1389,7 @@ export function installLocalBrowserStorageInterceptor(): void {
               organizationId: newId,
               actorOrigin: "user",
               activityType: "lead_created",
-              title: `Lead created in Local Browser Storage: ${newOrg.name}`,
+              title: `Lead #${formatLeadSequenceNumber(newOrg.sequenceNumber)} created in Local Browser Storage: ${newOrg.name}`,
               createdAt: nowIso,
             });
 
@@ -1152,11 +1404,44 @@ export function installLocalBrowserStorageInterceptor(): void {
               state.organizations = state.organizations.filter((o) => !idSet.has(o.id));
               state.memberships = state.memberships.filter((m) => !idSet.has(m.organizationId));
             } else {
+              if (operation === "assign_category" && value) {
+                const catName = String(value).trim();
+                const hasCat = state.categories.some(
+                  (c) => String(c.name || "").toLowerCase() === catName.toLowerCase()
+                );
+                if (!hasCat) {
+                  state.categories.push({
+                    id: uid("cat"),
+                    workspaceId: DEFAULT_WORKSPACE_ID,
+                    collectionId: null,
+                    name: catName,
+                    color: "#7958F5",
+                    sortOrder: state.categories.length + 1,
+                    createdAt: nowIso,
+                  });
+                }
+              }
+
               for (const org of state.organizations) {
                 if (!idSet.has(org.id)) continue;
                 if (operation === "change_stage" && value) org.primaryStageId = value;
                 else if (operation === "add_tag" && value) {
                   org.tags = Array.from(new Set([...(org.tags || []), String(value).trim()]));
+                } else if (operation === "assign_category" && value) {
+                  const catName = String(value).trim();
+                  org.industry = catName;
+                  org.categories = Array.from(new Set([catName, ...(org.categories || [])]));
+                  for (const m of state.memberships) {
+                    if (m.organizationId === org.id) {
+                      m.collectionCategories = Array.from(
+                        new Set([catName, ...(m.collectionCategories || [])])
+                      );
+                    }
+                  }
+                } else if (operation === "assign_day" && value) {
+                  const dayVal = String(value).trim();
+                  org.dayKey = dayVal;
+                  org.discoveryDate = dayVal;
                 } else if (operation === "set_qualification" && value) {
                   org.qualificationDecision = value;
                 } else if (operation === "archive") {
@@ -1188,6 +1473,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 org.updatedAt = nowIso;
               }
             }
+            normalizeLeadNumberingAndDays(state);
             state.activities.unshift({
               id: uid("act"),
               workspaceId: DEFAULT_WORKSPACE_ID,
@@ -1383,22 +1669,98 @@ export function installLocalBrowserStorageInterceptor(): void {
           }
 
           case "create_category": {
-            const id = uid("cat");
-            state.categories.push({
-              id,
-              workspaceId: DEFAULT_WORKSPACE_ID,
-              collectionId: payload.collectionId || null,
-              name: String(payload.name).trim(),
-              color: payload.color || "#7958F5",
-              sortOrder: state.categories.length + 1,
-              createdAt: nowIso,
-            });
+            const catName = String(payload.name || "").trim();
+            if (!catName) return jsonResponse({ error: "Category name required" }, 400);
+            const existingCat = state.categories.find(
+              (c) =>
+                String(c.name || "").toLowerCase() === catName.toLowerCase() &&
+                (!payload.collectionId || !c.collectionId || c.collectionId === payload.collectionId)
+            );
+            const id = existingCat ? existingCat.id : uid("cat");
+            if (!existingCat) {
+              state.categories.push({
+                id,
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                collectionId: payload.collectionId || null,
+                name: catName,
+                color: payload.color || "#7958F5",
+                sortOrder: state.categories.length + 1,
+                createdAt: nowIso,
+              });
+            }
+            if (Array.isArray(payload.organizationIds) && payload.organizationIds.length > 0) {
+              const idSet = new Set(payload.organizationIds);
+              for (const org of state.organizations) {
+                if (!idSet.has(org.id)) continue;
+                org.industry = catName;
+                org.categories = Array.from(new Set([catName, ...(org.categories || [])]));
+                org.updatedAt = nowIso;
+              }
+            }
             saveLocalBrowserDB(state);
-            return jsonResponse({ ok: true, id });
+            return jsonResponse({ ok: true, id, name: catName });
+          }
+
+          case "assign_lead_category": {
+            const { organizationId, categoryName } = payload;
+            const catName = String(categoryName || "").trim();
+            const org = state.organizations.find((o) => o.id === organizationId);
+            if (!org) return jsonResponse({ error: "Lead not found" }, 404);
+            if (catName) {
+              const hasCat = state.categories.some(
+                (c) => String(c.name || "").toLowerCase() === catName.toLowerCase()
+              );
+              if (!hasCat) {
+                state.categories.push({
+                  id: uid("cat"),
+                  workspaceId: DEFAULT_WORKSPACE_ID,
+                  collectionId: payload.collectionId || null,
+                  name: catName,
+                  color: "#7958F5",
+                  sortOrder: state.categories.length + 1,
+                  createdAt: nowIso,
+                });
+              }
+              org.industry = catName;
+              org.categories = Array.from(new Set([catName, ...(org.categories || [])]));
+              for (const m of state.memberships) {
+                if (m.organizationId === organizationId) {
+                  m.collectionCategories = Array.from(
+                    new Set([catName, ...(m.collectionCategories || [])])
+                  );
+                }
+              }
+            }
+            org.updatedAt = nowIso;
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, categoryName: catName });
+          }
+
+          case "create_day_slot": {
+            const dayKey = String(payload.dayKey || nowIso.split("T")[0]).trim();
+            const label = String(payload.label || `Daily Spreadsheet (${dayKey})`).trim();
+            if (!Array.isArray(state.days)) state.days = [];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const existingDay = state.days.find((d: Record<string, any>) => d.dayKey === dayKey);
+            if (existingDay) {
+              existingDay.label = label;
+              existingDay.updatedAt = nowIso;
+            } else {
+              state.days.push({
+                id: uid("day"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                dayKey,
+                label,
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              });
+            }
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, dayKey, label });
           }
 
           case "delete_category": {
-            state.categories = state.categories.filter((c) => c.id !== payload.id);
+            state.categories = state.categories.filter((c) => c.id !== payload.id && c.name !== payload.name);
             saveLocalBrowserDB(state);
             return jsonResponse({ ok: true });
           }
@@ -1947,6 +2309,8 @@ export function installLocalBrowserStorageInterceptor(): void {
         let mapping: Record<string, string> = {};
         let duplicatePolicy = "fill_blanks";
         let batchId: string | undefined;
+        let targetDayKey: string | undefined;
+        let targetCategory: string | undefined;
 
         if (init?.body instanceof FormData) {
           const formData = init.body;
@@ -1960,6 +2324,8 @@ export function installLocalBrowserStorageInterceptor(): void {
           if (formData.get("collectionId")) collectionId = String(formData.get("collectionId"));
           if (formData.get("mapping")) mapping = JSON.parse(String(formData.get("mapping")));
           if (formData.get("duplicatePolicy")) duplicatePolicy = String(formData.get("duplicatePolicy"));
+          if (formData.get("dayKey")) targetDayKey = String(formData.get("dayKey")).trim() || undefined;
+          if (formData.get("category")) targetCategory = String(formData.get("category")).trim() || undefined;
         } else if (init?.body) {
           const body = JSON.parse(String(init.body));
           mode = body.mode || "inspect";
@@ -1968,6 +2334,8 @@ export function installLocalBrowserStorageInterceptor(): void {
           mapping = body.mapping || {};
           duplicatePolicy = body.duplicatePolicy || "fill_blanks";
           batchId = body.batchId;
+          targetDayKey = body.dayKey ? String(body.dayKey).trim() : undefined;
+          targetCategory = body.category ? String(body.category).trim() : undefined;
 
           if (body.fileBase64 && body.filename) {
             filename = String(body.filename);
@@ -2061,6 +2429,41 @@ export function installLocalBrowserStorageInterceptor(): void {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const warningsSummary: Array<Record<string, any>> = [];
 
+          let maxGlobalSeq = state.organizations.reduce(
+            (acc, o) => Math.max(acc, typeof o.sequenceNumber === "number" ? o.sequenceNumber : 0),
+            0
+          );
+          const perDayMaxSeq: Record<string, number> = {};
+          for (const o of state.organizations) {
+            const dk = o.dayKey || o.discoveryDate || nowIso.split("T")[0];
+            const dSeq = typeof o.daySequenceNumber === "number" ? o.daySequenceNumber : 0;
+            if (dSeq > (perDayMaxSeq[dk] || 0)) {
+              perDayMaxSeq[dk] = dSeq;
+            }
+          }
+
+          if (targetCategory) {
+            const hasCat = state.categories.some(
+              (c) => String(c.name || "").toLowerCase() === targetCategory!.toLowerCase()
+            );
+            if (!hasCat) {
+              state.categories.push({
+                id: uid("cat"),
+                workspaceId: DEFAULT_WORKSPACE_ID,
+                collectionId,
+                name: targetCategory,
+                color: "#7958F5",
+                sortOrder: state.categories.length + 1,
+                createdAt: nowIso,
+              });
+            }
+          }
+
+          // Collect newly created organizations in spreadsheet row order (001, 002, 003...)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const newlyCreatedOrgs: Array<Record<string, any>> = [];
+          let resolvedBatchDayKey = targetDayKey || nowIso.split("T")[0];
+
           for (const row of preview.rows) {
             if (row.status === "invalid") continue;
             const m = row.mappedData;
@@ -2075,6 +2478,12 @@ export function installLocalBrowserStorageInterceptor(): void {
               });
             }
 
+            const rowDayKey = targetDayKey || m.discoveryDate || nowIso.split("T")[0];
+            resolvedBatchDayKey = rowDayKey;
+            const rowCategories = Array.from(
+              new Set([targetCategory, m.industry].filter(Boolean) as string[])
+            );
+
             if (row.matchedOrganizationId) {
               existingMatched++;
               if (duplicatePolicy === "skip_existing") {
@@ -2085,15 +2494,25 @@ export function installLocalBrowserStorageInterceptor(): void {
               if (existingOrg && duplicatePolicy !== "keep_existing") {
                 recordsUpdated++;
                 if (duplicatePolicy === "use_imported") {
-                  existingOrg.industry = m.industry || existingOrg.industry;
+                  existingOrg.industry = targetCategory || m.industry || existingOrg.industry;
                   existingOrg.observedFacts = m.observedFacts || existingOrg.observedFacts;
                   existingOrg.publishedContact = m.publishedContact || existingOrg.publishedContact;
                 } else {
-                  if (!existingOrg.industry && m.industry) existingOrg.industry = m.industry;
+                  if (!existingOrg.industry && (targetCategory || m.industry))
+                    existingOrg.industry = targetCategory || m.industry;
                   if (!existingOrg.observedFacts && m.observedFacts)
                     existingOrg.observedFacts = m.observedFacts;
                   if (!existingOrg.publishedContact && m.publishedContact)
                     existingOrg.publishedContact = m.publishedContact;
+                }
+                if (targetDayKey) {
+                  existingOrg.dayKey = targetDayKey;
+                  existingOrg.discoveryDate = targetDayKey;
+                }
+                if (rowCategories.length > 0) {
+                  existingOrg.categories = Array.from(
+                    new Set([...rowCategories, ...(existingOrg.categories || [])])
+                  );
                 }
                 existingOrg.updatedAt = nowIso;
               }
@@ -2108,7 +2527,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                   workspaceId: DEFAULT_WORKSPACE_ID,
                   collectionId,
                   organizationId: row.matchedOrganizationId,
-                  collectionCategories: m.industry ? [m.industry] : [],
+                  collectionCategories: rowCategories,
                   stageId: "stg_new",
                   customValues: m.customValues || {},
                   createdAt: nowIso,
@@ -2119,11 +2538,17 @@ export function installLocalBrowserStorageInterceptor(): void {
               const newOrgId = uid("org");
               newRecordsCreated++;
               createdOrganizationIds.push(newOrgId);
-              state.organizations.unshift({
+              maxGlobalSeq += 1;
+              perDayMaxSeq[rowDayKey] = (perDayMaxSeq[rowDayKey] || 0) + 1;
+
+              newlyCreatedOrgs.push({
                 id: newOrgId,
                 workspaceId: DEFAULT_WORKSPACE_ID,
                 externalId: m.externalId,
-                discoveryDate: m.discoveryDate || nowIso.split("T")[0],
+                dayKey: rowDayKey,
+                discoveryDate: rowDayKey,
+                sequenceNumber: maxGlobalSeq,
+                daySequenceNumber: perDayMaxSeq[rowDayKey],
                 name: m.name,
                 normalizedName: normalizeOrganizationName(m.name),
                 websiteUrl: m.websiteUrl,
@@ -2131,7 +2556,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 market: m.market || (String(m.country || "").toLowerCase() === "india" ? "India" : "International"),
                 country: m.country,
                 city: m.city,
-                industry: m.industry,
+                industry: targetCategory || m.industry,
                 description: m.observedFacts,
                 observedFacts: m.observedFacts,
                 sourceUrl: m.sourceUrl,
@@ -2148,7 +2573,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 sourceNotes: m.sourceNotes,
                 primaryPipelineId: DEFAULT_PIPELINE_ID,
                 primaryStageId: "stg_new",
-                categories: m.industry ? [m.industry] : [],
+                categories: rowCategories,
                 tags: [],
                 customValues: m.customValues || {},
                 score: null,
@@ -2164,7 +2589,7 @@ export function installLocalBrowserStorageInterceptor(): void {
                 workspaceId: DEFAULT_WORKSPACE_ID,
                 collectionId,
                 organizationId: newOrgId,
-                collectionCategories: m.industry ? [m.industry] : [],
+                collectionCategories: rowCategories,
                 stageId: "stg_new",
                 customValues: m.customValues || {},
                 createdAt: nowIso,
@@ -2186,10 +2611,15 @@ export function installLocalBrowserStorageInterceptor(): void {
             }
           }
 
+          if (newlyCreatedOrgs.length > 0) {
+            state.organizations = [...newlyCreatedOrgs, ...state.organizations];
+          }
+
           const batchRecord = {
             id: newBatchId,
             workspaceId: DEFAULT_WORKSPACE_ID,
             collectionId,
+            dayKey: resolvedBatchDayKey,
             filename,
             fileFormat: filename.toLowerCase().endsWith(".csv") ? "csv" : "xlsx",
             selectedSheet,
@@ -2219,7 +2649,7 @@ export function installLocalBrowserStorageInterceptor(): void {
             collectionId,
             actorOrigin: "import",
             activityType: "lead_imported",
-            title: `${newRecordsCreated} new leads imported (${existingMatched} matched) from ${filename}`,
+            title: `${newRecordsCreated} new leads imported (${existingMatched} matched) from ${filename} for Day ${resolvedBatchDayKey}`,
             createdAt: nowIso,
           });
           saveLocalBrowserDB(state);
