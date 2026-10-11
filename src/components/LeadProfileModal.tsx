@@ -26,8 +26,11 @@ import {
   RefreshCw,
   Compass,
   Maximize2,
+  CalendarDays,
+  FolderPlus,
 } from "lucide-react";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
+import { formatLeadSequenceNumber } from "@/lib/browser-storage";
 
 export function resolveLeadWebPages(org: {
   websiteUrl?: string | null;
@@ -690,6 +693,55 @@ export function LeadProfileModal({
     (f) => !f.collectionId || memberCollectionIds.includes(f.collectionId)
   );
 
+  const displaySeqNumber = formatLeadSequenceNumber(
+    currentIdx !== -1 ? currentIdx + 1 : org.daySequenceNumber || org.sequenceNumber || 1
+  );
+
+  const availableCategoryNames = Array.from(
+    new Set([
+      ...((detail.categoryTrees || []).map((c: { name: string }) => c.name)),
+      ...(org.industry ? [org.industry] : []),
+      ...((org.categories || []) as string[]),
+    ])
+  ).filter(Boolean);
+
+  async function handleQuickAssignCategory(categoryName: string) {
+    if (!categoryName) return;
+    if (categoryName === "__create_new__") {
+      const custom = window.prompt("Enter new category name to create & store this lead:");
+      if (!custom || !custom.trim()) return;
+      categoryName = custom.trim();
+      await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create_category",
+          payload: {
+            collectionId: primaryCol?.id || null,
+            name: categoryName,
+            color: "#3B82F6",
+          },
+        }),
+      });
+    }
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "assign_lead_category",
+        payload: {
+          organizationId: org.id,
+          categoryName,
+        },
+      }),
+    });
+    if (res.ok) {
+      await fetchDetail();
+      await onMutated();
+      notify(`Stored ${org.name} in category "${categoryName}"`, "success");
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4"
@@ -707,11 +759,15 @@ export function LeadProfileModal({
           <div className="flex flex-wrap items-start justify-between gap-4 pb-5">
             {/* Left: Identity + Website Page & Contact Page Buttons */}
             <div className="flex items-start gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-lg flex items-center justify-center shrink-0 shadow-sm">
-                {org.name.slice(0, 2).toUpperCase()}
+              <div className="w-14 h-14 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-mono font-bold text-base tabular-nums flex flex-col items-center justify-center shrink-0 shadow-sm">
+                <span className="text-[11px] leading-none opacity-80">#{displaySeqNumber}</span>
+                <span className="font-heading text-sm mt-0.5">{org.name.slice(0, 2).toUpperCase()}</span>
               </div>
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center gap-2.5">
+                  <span className="px-2.5 py-0.5 rounded-md bg-accent/15 border border-accent/40 font-mono text-xs font-bold text-accent tabular-nums">
+                    #{displaySeqNumber}
+                  </span>
                   <h2
                     id="lead-profile-heading"
                     className="text-xl sm:text-2xl font-heading font-bold text-text-primary tracking-tight"
@@ -723,6 +779,10 @@ export function LeadProfileModal({
                       {org.externalId}
                     </span>
                   )}
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-app-secondary border border-app-border font-mono text-xs text-text-secondary tabular-nums">
+                    <CalendarDays className="w-3.5 h-3.5 text-accent" />
+                    Day: {org.dayKey || org.discoveryDate || "Today"}
+                  </span>
                   <span
                     className={`px-3 py-0.5 rounded-full text-xs font-heading font-semibold tabular-nums ${
                       org.score !== null && org.score >= 75
@@ -744,7 +804,7 @@ export function LeadProfileModal({
                   )}
                 </div>
 
-                {/* Subtitle + Side-by-Side Website Page & Contact Page Buttons (Open in This Tab Only) */}
+                {/* Subtitle + Category Selector + Side-by-Side Website Page & Contact Page Buttons (Open in This Tab Only) */}
                 <div className="flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
                   <span>{org.country || "Unknown Country"}</span>
                   {org.market && (
@@ -753,12 +813,24 @@ export function LeadProfileModal({
                       <span>{org.market} Market</span>
                     </>
                   )}
-                  {org.industry && (
-                    <>
-                      <span>•</span>
-                      <span className="text-text-primary font-medium">{org.industry}</span>
-                    </>
-                  )}
+                  <span>•</span>
+                  <div className="inline-flex items-center gap-1.5">
+                    <FolderPlus className="w-3.5 h-3.5 text-accent" />
+                    <select
+                      aria-label="Lead Category"
+                      value={org.industry || org.categories?.[0] || ""}
+                      onChange={(e) => handleQuickAssignCategory(e.target.value)}
+                      className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1 text-xs font-medium text-text-primary focus:outline-none focus:border-accent"
+                    >
+                      <option value="">Uncategorized (Select Category...)</option>
+                      {availableCategoryNames.map((catName, idx) => (
+                        <option key={catName} value={catName}>
+                          {formatLeadSequenceNumber(idx + 1)} • {catName}
+                        </option>
+                      ))}
+                      <option value="__create_new__">+ Create New Category...</option>
+                    </select>
+                  </div>
 
                   {/* Always show BOTH Website Page and Contact Page buttons when available, opening in this tab only */}
                   {websitePageUrl && (
