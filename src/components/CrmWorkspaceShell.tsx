@@ -118,6 +118,7 @@ export function CrmWorkspaceShell({
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [dashboardLeadPageSize, setDashboardLeadPageSize] = useState<50 | 100 | "unlimited">(50);
 
   // Quick-Add Lead form
   const [qaName, setQaName] = useState("");
@@ -1060,20 +1061,43 @@ export function CrmWorkspaceShell({
                 </div>
 
                 <div className="lg:col-span-2 bg-app-surface border border-app-border rounded-xl p-5 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-sm font-heading font-semibold text-text-primary">
                       Recently Updated Leads
                     </h2>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCollectionId(undefined);
-                        setActiveNav("leads");
-                      }}
-                      className="text-xs text-accent hover:underline"
-                    >
-                      Open Lead Database →
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div
+                        className="flex items-center gap-1 bg-app-secondary px-2 py-0.5 rounded-lg border border-app-border text-xs"
+                        role="group"
+                        aria-label="Dashboard leads per page selector"
+                      >
+                        <span className="text-[10px] font-mono text-text-muted mr-1">Show:</span>
+                        {([50, 100, "unlimited"] as const).map((opt) => (
+                          <button
+                            key={String(opt)}
+                            type="button"
+                            onClick={() => setDashboardLeadPageSize(opt)}
+                            className={`px-2 py-0.5 rounded font-mono text-[11px] font-semibold transition ${
+                              dashboardLeadPageSize === opt
+                                ? "bg-accent text-white"
+                                : "text-text-secondary hover:text-text-primary"
+                            }`}
+                          >
+                            {opt === "unlimited" ? "Unlimited" : opt}
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedCollectionId(undefined);
+                          setActiveNav("leads");
+                        }}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        Open Lead Database →
+                      </button>
+                    </div>
                   </div>
 
                   {organizations.length === 0 ? (
@@ -1099,9 +1123,9 @@ export function CrmWorkspaceShell({
                       </div>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto max-h-[480px] overflow-y-auto">
                       <table className="w-full text-left text-xs">
-                        <thead className="bg-app-secondary text-text-muted font-sans font-semibold uppercase text-[11px]">
+                        <thead className="bg-app-secondary text-text-muted font-sans font-semibold uppercase text-[11px] sticky top-0">
                           <tr>
                             <th className="py-2 px-3">Company</th>
                             <th className="py-2 px-3">Market / Country</th>
@@ -1111,8 +1135,11 @@ export function CrmWorkspaceShell({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-app-border">
-                          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                          {organizations.slice(0, 6).map((o: any) => (
+                          {(dashboardLeadPageSize === "unlimited"
+                            ? organizations
+                            : organizations.slice(0, dashboardLeadPageSize)
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          ).map((o: any) => (
                             <tr
                               key={o.id}
                               onClick={() => setActiveLeadProfileId(o.id)}
