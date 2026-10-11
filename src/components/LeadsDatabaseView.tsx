@@ -12,7 +12,6 @@ import {
   MapPin,
   AlertTriangle,
   Globe,
-  ExternalLink,
   CheckSquare,
   Square,
   ChevronLeft,
@@ -27,9 +26,14 @@ import {
   MessageSquare,
   Compass,
   Maximize2,
-  RefreshCw,
+  Calendar,
+  FolderPlus,
+  Hash,
 } from "lucide-react";
-import { triggerLocalBrowserFileDownload } from "@/lib/browser-storage";
+import {
+  triggerLocalBrowserFileDownload,
+  formatLeadSequenceNumber,
+} from "@/lib/browser-storage";
 import { resolveLeadWebPages } from "./LeadProfileModal";
 
 interface LeadsDatabaseViewProps {
@@ -52,6 +56,7 @@ export function LeadsDatabaseView({
   collectionId,
   collections,
   stages,
+  categories,
   savedViews,
   onOpenLead,
   onOpenQuickAdd,
@@ -68,6 +73,14 @@ export function LeadsDatabaseView({
   const [inTabPreview, setInTabPreview] = useState<{ lead: any; mode: "website" | "contact" } | null>(null);
   const [importingFile, setImportingFile] = useState(false);
 
+  const [selectedDay, setSelectedDay] = useState<string>("");
+  const [newDayDate, setNewDayDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [newDayLabel, setNewDayLabel] = useState<string>("");
+  const [showAddDayForm, setShowAddDayForm] = useState(false);
+
+  const [newCategoryName, setNewCategoryName] = useState<string>("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
   const [search, setSearch] = useState("");
   const [marketFilter, setMarketFilter] = useState("");
   const [countryFilter, setCountryFilter] = useState("");
@@ -77,13 +90,19 @@ export function LeadsDatabaseView({
   const [qualificationFilter, setQualificationFilter] = useState("");
   const [warningsOnly, setWarningsOnly] = useState(false);
   const [minScoreFilter, setMinScoreFilter] = useState<string>("");
-  const [sortBy, setSortBy] = useState<"updatedAt" | "name" | "score" | "country">("updatedAt");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [sortBy, setSortBy] = useState<
+    "sequenceNumber" | "updatedAt" | "name" | "score" | "country"
+  >("sequenceNumber");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [rows, setRows] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [availableDays, setAvailableDays] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [availableCategories, setAvailableCategories] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -94,6 +113,7 @@ export function LeadsDatabaseView({
   const [showColumnMenu, setShowColumnMenu] = useState(false);
 
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
+    number: true,
     website: true,
     country: true,
     niche: true,
@@ -116,6 +136,7 @@ export function LeadsDatabaseView({
       sp.set("sortBy", sortBy);
       sp.set("sortDir", sortDir);
       if (collectionId) sp.set("collectionId", collectionId);
+      if (selectedDay) sp.set("day", selectedDay);
       if (search.trim()) sp.set("search", search.trim());
       if (marketFilter) sp.set("market", marketFilter);
       if (countryFilter) sp.set("country", countryFilter);
@@ -132,6 +153,8 @@ export function LeadsDatabaseView({
         setRows(data.rows || []);
         setTotalCount(data.totalCount || 0);
         setTotalPages(data.totalPages || 1);
+        setAvailableDays(data.availableDays || []);
+        setAvailableCategories(data.availableCategories || []);
       }
     } finally {
       setLoading(false);
@@ -142,6 +165,7 @@ export function LeadsDatabaseView({
     sortBy,
     sortDir,
     collectionId,
+    selectedDay,
     search,
     marketFilter,
     countryFilter,
@@ -159,7 +183,7 @@ export function LeadsDatabaseView({
 
   useEffect(() => {
     setSwipeIndex(0);
-  }, [rows.length, collectionId, search, marketFilter]);
+  }, [rows.length, collectionId, selectedDay, categoryFilter, search, marketFilter]);
 
   async function handleDirectFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -174,16 +198,27 @@ export function LeadsDatabaseView({
       } else if (collections[0]?.id) {
         formData.append("collectionId", collections[0].id);
       }
+      if (selectedDay) {
+        formData.append("dayKey", selectedDay);
+      }
+      if (categoryFilter) {
+        formData.append("category", categoryFilter);
+      }
       const res = await fetch("/api/import", {
         method: "POST",
         body: formData,
       });
       const json = await res.json();
       if (res.ok && json.batch) {
+        if (json.batch.dayKey && !selectedDay) {
+          setSelectedDay(json.batch.dayKey);
+        }
         await fetchLeads();
         await onMutated();
         notify(
-          `Imported ${json.batch.newRecordsCreated} new leads (${json.batch.existingMatched} matched) from ${file.name}`,
+          `Imported ${json.batch.newRecordsCreated} leads (#001 → #${formatLeadSequenceNumber(
+            json.batch.newRecordsCreated || 1
+          )}) from ${file.name} into Day ${json.batch.dayKey || "Today"}`,
           "success"
         );
       } else {
@@ -194,6 +229,93 @@ export function LeadsDatabaseView({
     } finally {
       setImportingFile(false);
       e.target.value = "";
+    }
+  }
+
+  async function handleCreateDaySlot(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newDayDate) return;
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "create_day_slot",
+        payload: {
+          dayKey: newDayDate,
+          label: newDayLabel.trim() || `Daily Spreadsheet (${newDayDate})`,
+        },
+      }),
+    });
+    if (res.ok) {
+      setSelectedDay(newDayDate);
+      setNewDayLabel("");
+      setShowAddDayForm(false);
+      setPage(1);
+      await fetchLeads();
+      await onMutated();
+      notify(`Selected Day ${newDayDate} — ready for daily spreadsheet leads`, "success");
+    }
+  }
+
+  async function handleCreateCategoryInLeads(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    setCreatingCategory(true);
+    try {
+      const res = await fetch("/api/workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create_category",
+          payload: {
+            collectionId: collectionId || null,
+            name: trimmed,
+            color: "#7958F5",
+            organizationIds: selectedIds.size > 0 ? Array.from(selectedIds) : [],
+          },
+        }),
+      });
+      if (res.ok) {
+        setNewCategoryName("");
+        await fetchLeads();
+        await onMutated();
+        notify(
+          selectedIds.size > 0
+            ? `Created category "${trimmed}" and stored ${selectedIds.size} selected lead(s) in it`
+            : `Created category "${trimmed}" in Leads`,
+          "success"
+        );
+      }
+    } finally {
+      setCreatingCategory(false);
+    }
+  }
+
+  async function handleAssignLeadCategory(
+    orgId: string,
+    orgName: string,
+    categoryName: string,
+    e?: React.MouseEvent | React.ChangeEvent
+  ) {
+    if (e) e.stopPropagation();
+    if (!categoryName) return;
+    const res = await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "assign_lead_category",
+        payload: {
+          organizationId: orgId,
+          categoryName,
+          collectionId: collectionId || null,
+        },
+      }),
+    });
+    if (res.ok) {
+      await fetchLeads();
+      await onMutated();
+      notify(`Stored ${orgName} in category "${categoryName}"`, "success");
     }
   }
 
@@ -353,6 +475,8 @@ export function LeadsDatabaseView({
     operation:
       | "change_stage"
       | "add_tag"
+      | "assign_category"
+      | "assign_day"
       | "assign_collection"
       | "set_qualification"
       | "archive",
@@ -407,7 +531,16 @@ export function LeadsDatabaseView({
     return acc;
   }, {});
 
+  // Combine category names for inline dropdowns
+  const allCategoryNames = Array.from(
+    new Set([
+      ...availableCategories.map((c) => String(c.name)),
+      ...categories.map((c) => String(c.name)),
+    ].filter(Boolean))
+  );
+
   const activeSwipeLead = rows[swipeIndex] || rows[0] || null;
+  const activeDayObj = availableDays.find((d) => d.dayKey === selectedDay);
 
   return (
     <div className="space-y-4">
@@ -433,7 +566,12 @@ export function LeadsDatabaseView({
               {activeCol ? activeCol.name : "All Leads Database"}
             </h1>
             <p className="text-xs text-text-secondary font-mono">
-              {totalCount} leads matching current filters • Click any lead to open Centered Card
+              {totalCount} leads numbered 001 →{" "}
+              {totalCount > 0 ? formatLeadSequenceNumber(totalCount) : "∞"} •{" "}
+              {selectedDay
+                ? `Showing Day ${activeDayObj?.formattedDayNumber || "001"} (${selectedDay})`
+                : "All Daily Spreadsheets"}{" "}
+              {categoryFilter ? `• Category: ${categoryFilter}` : ""}
             </p>
           </div>
         </div>
@@ -474,7 +612,11 @@ export function LeadsDatabaseView({
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-surface hover:bg-app-elevated border border-accent/50 text-xs font-semibold text-accent hover:text-text-primary transition"
           >
             <Upload className="w-3.5 h-3.5" />
-            {importingFile ? "Importing..." : "Import .XLSX / .CSV"}
+            {importingFile
+              ? "Importing..."
+              : selectedDay
+              ? `Import Spreadsheet for ${selectedDay}`
+              : "Import .XLSX / .CSV"}
           </button>
 
           <button
@@ -497,6 +639,229 @@ export function LeadsDatabaseView({
         </div>
       </div>
 
+      {/* ==================================================================== */}
+      {/* 1. DAILY SPREADSHEET / DAY SELECTOR BAR ("WHICH DAY DO YOU WANT TO SEE?") */}
+      {/* Numbered 001, 002, 003 ... till Infinity for each day's spreadsheet */}
+      {/* ==================================================================== */}
+      <div className="bg-app-surface border border-app-border rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-accent" />
+            <span className="font-heading font-bold text-xs uppercase tracking-wider text-text-primary">
+              Which Day Do You Want to See? (Daily Spreadsheets • 001 → ∞)
+            </span>
+            <span className="text-[11px] text-text-muted font-mono">
+              Each day has its own spreadsheet &amp; leads numbered 001, 002, 003...
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowAddDayForm(!showAddDayForm)}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-xs font-medium text-text-primary transition"
+            >
+              <Plus className="w-3.5 h-3.5 text-accent" />
+              {showAddDayForm ? "Close Day Picker" : "+ New Day / Select Date"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent/15 hover:bg-accent text-accent hover:text-white border border-accent/30 text-xs font-semibold transition"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              {selectedDay ? `Upload Spreadsheet to ${selectedDay}` : "Upload Today's Spreadsheet"}
+            </button>
+          </div>
+        </div>
+
+        {showAddDayForm && (
+          <form
+            onSubmit={handleCreateDaySlot}
+            className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-app-secondary border border-app-border text-xs"
+          >
+            <span className="font-mono text-text-secondary">Date:</span>
+            <input
+              type="date"
+              value={newDayDate}
+              onChange={(e) => setNewDayDate(e.target.value)}
+              className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1 text-xs text-text-primary font-mono"
+            />
+            <input
+              type="text"
+              placeholder="Spreadsheet / Day label (optional, e.g. US Shopify Leads)..."
+              value={newDayLabel}
+              onChange={(e) => setNewDayLabel(e.target.value)}
+              className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1 text-xs text-text-primary flex-1 min-w-[200px]"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1 rounded-lg bg-accent text-white font-semibold"
+            >
+              Add / Open Day
+            </button>
+          </form>
+        )}
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedDay("");
+              setPage(1);
+            }}
+            className={`shrink-0 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-semibold transition ${
+              !selectedDay
+                ? "bg-accent text-white border-accent shadow-sm"
+                : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <span className="font-mono px-1.5 py-0.5 rounded bg-black/20 text-[11px]">ALL</span>
+            <span>All Days</span>
+            <span className="font-mono text-[11px] opacity-80">
+              ({availableDays.reduce((acc, d) => acc + (d.leadCount || 0), 0)})
+            </span>
+          </button>
+
+          {availableDays.map((d) => {
+            const isSelected = selectedDay === d.dayKey;
+            return (
+              <button
+                key={d.dayKey}
+                type="button"
+                onClick={() => {
+                  setSelectedDay(isSelected ? "" : d.dayKey);
+                  setPage(1);
+                }}
+                className={`shrink-0 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs transition ${
+                  isSelected
+                    ? "bg-accent text-white border-accent font-semibold shadow-sm"
+                    : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-primary"
+                }`}
+              >
+                <span
+                  className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] tabular-nums ${
+                    isSelected ? "bg-white/20 text-white" : "bg-accent/15 text-accent"
+                  }`}
+                >
+                  #{d.formattedDayNumber}
+                </span>
+                <div className="text-left">
+                  <div className="font-mono font-semibold text-xs leading-tight">{d.dayKey}</div>
+                  <div
+                    className={`text-[10px] truncate max-w-[160px] ${
+                      isSelected ? "text-white/85" : "text-text-muted"
+                    }`}
+                  >
+                    {d.label}
+                  </div>
+                </div>
+                <span
+                  className={`font-mono font-bold text-[11px] px-2 py-0.5 rounded-full tabular-nums ${
+                    isSelected ? "bg-black/25 text-white" : "bg-app-surface text-text-secondary"
+                  }`}
+                >
+                  {d.leadCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ==================================================================== */}
+      {/* 2. CATEGORIES ORGANIZER & CREATOR DIRECTLY IN LEADS (001, 002 ... ∞) */}
+      {/* View categories, create new categories, and store leads inside them */}
+      {/* ==================================================================== */}
+      <div className="bg-app-surface border border-app-border rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FolderPlus className="w-4 h-4 text-accent" />
+            <span className="font-heading font-bold text-xs uppercase tracking-wider text-text-primary">
+              Lead Categories ({selectedDay ? `Day ${selectedDay}` : "All Days"} • 001 → ∞)
+            </span>
+            <span className="text-[11px] text-text-muted font-mono">
+              Click any category to view stored leads, or create a new category below to store leads in it
+            </span>
+          </div>
+
+          <form onSubmit={handleCreateCategoryInLeads} className="flex items-center gap-1.5">
+            <input
+              type="text"
+              placeholder={
+                selectedIds.size > 0
+                  ? `Create category & store ${selectedIds.size} lead(s)...`
+                  : "New category name (e.g. Shopify Plus, AI Agency)..."
+              }
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              className="bg-app-secondary border border-app-border rounded-lg px-3 py-1.5 text-xs text-text-primary w-64"
+            />
+            <button
+              type="submit"
+              disabled={creatingCategory || !newCategoryName.trim()}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-40 text-white text-xs font-semibold transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              {selectedIds.size > 0 ? "Create & Store Selected" : "+ Create Category"}
+            </button>
+          </form>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryFilter("");
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+              !categoryFilter
+                ? "bg-accent text-white border-accent font-semibold"
+                : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            <span>All Categories</span>
+          </button>
+
+          {availableCategories.map((cat) => {
+            const isCatActive = categoryFilter.toLowerCase() === String(cat.name).toLowerCase();
+            return (
+              <button
+                key={cat.name}
+                type="button"
+                onClick={() => {
+                  setCategoryFilter(isCatActive ? "" : cat.name);
+                  setPage(1);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs border transition ${
+                  isCatActive
+                    ? "bg-accent text-white border-accent font-semibold"
+                    : "bg-app-secondary hover:bg-app-elevated border-app-border text-text-primary"
+                }`}
+              >
+                <span
+                  className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded tabular-nums ${
+                    isCatActive ? "bg-white/20 text-white" : "bg-accent/15 text-accent"
+                  }`}
+                >
+                  {cat.formattedCategoryNumber}
+                </span>
+                <span>{cat.name}</span>
+                <span
+                  className={`font-mono text-[10px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                    isCatActive ? "bg-black/25 text-white" : "bg-app-surface text-text-muted"
+                  }`}
+                >
+                  {cat.leadCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Saved Views Strip (Section 10.2 & 13.2) */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-app-surface border border-app-border rounded-xl p-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -504,7 +869,7 @@ export function LeadsDatabaseView({
             type="button"
             onClick={resetFilters}
             className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-              !marketFilter && !verificationFilter && !qualificationFilter && !warningsOnly
+              !marketFilter && !verificationFilter && !qualificationFilter && !warningsOnly && !categoryFilter
                 ? "bg-accent text-white"
                 : "bg-app-secondary text-text-secondary hover:text-text-primary"
             }`}
@@ -609,7 +974,7 @@ export function LeadsDatabaseView({
           <Search className="w-4 h-4 text-text-muted absolute left-3 top-2.5" />
           <input
             type="text"
-            placeholder="Search company, domain, Lead ID, facts, contact..."
+            placeholder="Search #001, company, domain, Lead ID, category, contact..."
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -679,8 +1044,10 @@ export function LeadsDatabaseView({
               setSortBy(sb as typeof sortBy);
               setSortDir(sd as typeof sortDir);
             }}
-            className="flex-1 bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
+            className="flex-1 bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary font-mono"
           >
+            <option value="sequenceNumber:asc">Sort: Number (001 → ∞)</option>
+            <option value="sequenceNumber:desc">Sort: Number (∞ → 001)</option>
             <option value="updatedAt:desc">Sort: Recently Updated</option>
             <option value="name:asc">Sort: Name (A → Z)</option>
             <option value="name:desc">Sort: Name (Z → A)</option>
@@ -743,6 +1110,44 @@ export function LeadsDatabaseView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              aria-label="Bulk Store in Category"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkOperation("assign_category", e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              className="bg-app-surface border border-accent/50 rounded-lg px-2.5 py-1.5 text-text-primary font-semibold"
+            >
+              <option value="">Store in Category...</option>
+              {allCategoryNames.map((catName) => (
+                <option key={catName} value={catName}>
+                  Store in: {catName}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Bulk Move to Day"
+              defaultValue=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkOperation("assign_day", e.target.value);
+                  e.target.value = "";
+                }
+              }}
+              className="bg-app-surface border border-app-border rounded-lg px-2.5 py-1.5 text-text-primary font-mono"
+            >
+              <option value="">Move to Day...</option>
+              {availableDays.map((d) => (
+                <option key={d.dayKey} value={d.dayKey}>
+                  Day #{d.formattedDayNumber} ({d.dayKey})
+                </option>
+              ))}
+            </select>
+
             <select
               aria-label="Bulk Move Stage"
               onChange={(e) => {
@@ -862,16 +1267,25 @@ export function LeadsDatabaseView({
                 swipeSiteMode === "contact"
                   ? swipeUrls.contactPageUrl || swipeUrls.websitePageUrl
                   : swipeUrls.websitePageUrl || swipeUrls.contactPageUrl;
+              const swipeLeadNumber =
+                activeSwipeLead.displayNumber ||
+                formatLeadSequenceNumber(swipeIndex + 1);
 
               return (
                 <div className="w-full max-w-4xl bg-app-surface border border-app-border rounded-3xl shadow-2xl overflow-hidden transition-all">
                   {/* Card Top Banner */}
                   <div className="p-7 bg-gradient-to-br from-app-sidebar via-app-surface to-app-secondary border-b border-app-border space-y-4">
                     <div className="flex items-center justify-between text-xs font-mono text-text-muted">
-                      <span>
-                        LEAD CARD {swipeIndex + 1} OF {rows.length} •{" "}
-                        {activeSwipeLead.externalId || activeSwipeLead.id.slice(0, 8)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-1 rounded-lg bg-accent text-white font-bold tabular-nums text-xs">
+                          #{swipeLeadNumber}
+                        </span>
+                        <span>
+                          LEAD {swipeLeadNumber} OF {formatLeadSequenceNumber(rows.length)} • DAY{" "}
+                          {activeSwipeLead.dayKey || activeSwipeLead.discoveryDate || "TODAY"} •{" "}
+                          {activeSwipeLead.externalId || activeSwipeLead.id.slice(0, 8)}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -900,8 +1314,9 @@ export function LeadsDatabaseView({
 
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="flex items-start gap-4">
-                        <div className="w-16 h-16 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-heading font-bold text-xl flex items-center justify-center shrink-0">
-                          {activeSwipeLead.name.slice(0, 2).toUpperCase()}
+                        <div className="w-16 h-16 rounded-2xl bg-accent/20 border border-accent/40 text-accent font-mono font-bold text-lg flex flex-col items-center justify-center shrink-0 tabular-nums">
+                          <span className="text-[10px] opacity-75">NO.</span>
+                          <span>{swipeLeadNumber}</span>
                         </div>
                         <div className="space-y-2">
                           <button
@@ -914,9 +1329,34 @@ export function LeadsDatabaseView({
                           <div className="flex flex-wrap items-center gap-2.5 text-sm text-text-secondary">
                             <span>{activeSwipeLead.country || "Global"}</span>
                             <span>•</span>
-                            <span className="px-2.5 py-0.5 rounded-lg bg-accent/15 text-accent text-xs font-semibold">
-                              {activeSwipeLead.industry || "E-Commerce"}
-                            </span>
+                            <select
+                              aria-label="Store lead in category"
+                              value={
+                                activeSwipeLead.industry ||
+                                activeSwipeLead.categories?.[0] ||
+                                ""
+                              }
+                              onChange={(e) =>
+                                handleAssignLeadCategory(
+                                  activeSwipeLead.id,
+                                  activeSwipeLead.name,
+                                  e.target.value,
+                                  e
+                                )
+                              }
+                              className="px-2.5 py-1 rounded-lg bg-accent/15 border border-accent/30 text-accent text-xs font-semibold"
+                            >
+                              <option value="">
+                                {activeSwipeLead.industry ||
+                                  activeSwipeLead.categories?.[0] ||
+                                  "Store in Category..."}
+                              </option>
+                              {allCategoryNames.map((catName) => (
+                                <option key={catName} value={catName}>
+                                  {catName}
+                                </option>
+                              ))}
+                            </select>
 
                             {/* Both Website Page and Contact Page Buttons Side-by-Side (Open in This Tab Only) */}
                             {swipeUrls.websitePageUrl && (
@@ -1182,10 +1622,18 @@ export function LeadsDatabaseView({
                       )}
                     </button>
                   </th>
+                  {visibleCols.number && (
+                    <th className="py-2 px-3 w-20 font-mono">
+                      <span className="inline-flex items-center gap-1">
+                        <Hash className="w-3 h-3 text-accent" />
+                        No. (001→∞)
+                      </span>
+                    </th>
+                  )}
                   <th className="py-2 px-3">Company / Organization</th>
                   {visibleCols.website && <th className="py-2 px-3">Website &amp; Contact Page (In-Tab)</th>}
                   {visibleCols.country && <th className="py-2 px-3">Country / Market</th>}
-                  {visibleCols.niche && <th className="py-2 px-3">Niche / Category</th>}
+                  {visibleCols.niche && <th className="py-2 px-3">Category (Store / Filter)</th>}
                   {visibleCols.verification && <th className="py-2 px-3">Verification</th>}
                   {visibleCols.score && <th className="py-2 px-3">Score</th>}
                   {visibleCols.stage && <th className="py-2 px-3">Pipeline Stage</th>}
@@ -1201,20 +1649,20 @@ export function LeadsDatabaseView({
                 {loading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td colSpan={12} className="py-3.5 px-4">
+                      <td colSpan={13} className="py-3.5 px-4">
                         <div className="h-4 bg-app-secondary rounded w-full" />
                       </td>
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
                   <tr>
-                    <td colSpan={12} className="py-12 text-center text-text-secondary">
+                    <td colSpan={13} className="py-12 text-center text-text-secondary">
                       <div className="max-w-md mx-auto space-y-2.5">
                         <p className="font-heading font-semibold text-sm text-text-primary">
                           No leads in this view yet
                         </p>
                         <p className="text-xs text-text-muted">
-                          Import your `.xlsx` or `.csv` spreadsheet directly here, or add a new lead manually. Clicking any lead opens its centered card.
+                          Import your `.xlsx` or `.csv` spreadsheet directly here, or add a new lead manually. All leads are automatically numbered 001, 002, 003... till Infinity.
                         </p>
                         <div className="flex flex-wrap justify-center gap-2 pt-2">
                           <button
@@ -1244,7 +1692,7 @@ export function LeadsDatabaseView({
                     </td>
                   </tr>
                 ) : (
-                  rows.map((r) => {
+                  rows.map((r, rowIdx) => {
                     const isSelected = selectedIds.has(r.id);
                     const isDirOnly = (r.verificationLevel || "")
                       .toLowerCase()
@@ -1252,6 +1700,10 @@ export function LeadsDatabaseView({
                     const hasEvidenceAnomaly = !r.contactEvidenceValid;
                     const msgStatus = r.messageStatus || "not_messaged";
                     const rowUrls = resolveLeadWebPages(r);
+                    const rowNumStr =
+                      r.displayNumber ||
+                      formatLeadSequenceNumber((page - 1) * pageSize + rowIdx + 1);
+                    const currentCat = r.industry || r.categories?.[0] || "General";
 
                     return (
                       <tr
@@ -1281,6 +1733,19 @@ export function LeadsDatabaseView({
                           </button>
                         </td>
 
+                        {visibleCols.number && (
+                          <td className="py-2 px-3 font-mono">
+                            <div className="flex flex-col">
+                              <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-md bg-accent/15 border border-accent/30 text-accent font-bold text-xs tabular-nums w-fit">
+                                {rowNumStr}
+                              </span>
+                              <span className="text-[10px] text-text-muted mt-0.5 tabular-nums">
+                                {r.dayKey || r.discoveryDate || "Today"}
+                              </span>
+                            </div>
+                          </td>
+                        )}
+
                         <td className="py-2 px-3">
                           <div className="flex items-center gap-2.5">
                             <div className="w-7 h-7 rounded-lg bg-accent/15 border border-accent/30 text-accent font-heading font-bold text-[11px] flex items-center justify-center shrink-0">
@@ -1298,6 +1763,8 @@ export function LeadsDatabaseView({
                                 {r.name}
                               </button>
                               <div className="flex items-center gap-1.5 text-[10px] font-mono text-text-muted">
+                                <span>#{rowNumStr}</span>
+                                <span>•</span>
                                 <span>{r.externalId || r.id.slice(0, 8)}</span>
                                 <span>•</span>
                                 <span>{r.sourceLeadStatus || "candidate"}</span>
@@ -1367,10 +1834,27 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.niche && (
-                          <td className="py-2 px-3">
-                            <span className="px-2 py-0.5 rounded-md bg-accent/15 text-accent font-medium text-[11px]">
-                              {r.industry || r.categories?.[0] || "General"}
-                            </span>
+                          <td
+                            className="py-2 px-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <select
+                              aria-label={`Category for ${r.name}`}
+                              value={currentCat}
+                              onChange={(e) =>
+                                handleAssignLeadCategory(r.id, r.name, e.target.value, e)
+                              }
+                              className="px-2 py-1 rounded-md bg-accent/15 border border-accent/30 text-accent font-medium text-[11px] max-w-[160px]"
+                            >
+                              <option value={currentCat}>{currentCat}</option>
+                              {allCategoryNames
+                                .filter((cName) => cName !== currentCat)
+                                .map((catName) => (
+                                  <option key={catName} value={catName}>
+                                    {catName}
+                                  </option>
+                                ))}
+                            </select>
                           </td>
                         )}
 
@@ -1534,11 +2018,18 @@ export function LeadsDatabaseView({
           <div className="px-4 py-3 bg-app-secondary border-t border-app-border flex flex-wrap items-center justify-between gap-3 text-xs text-text-secondary">
             <div>
               Showing{" "}
-              <strong className="font-sans font-semibold tabular-nums text-text-primary">
-                {rows.length === 0 ? 0 : (page - 1) * pageSize + 1}–
-                {Math.min(totalCount, page * pageSize)}
+              <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                {rows.length === 0
+                  ? "000"
+                  : formatLeadSequenceNumber((page - 1) * pageSize + 1)}
+                –
+                {formatLeadSequenceNumber(Math.min(totalCount, page * pageSize))}
               </strong>{" "}
-              of <strong className="font-sans font-semibold tabular-nums text-text-primary">{totalCount}</strong> records
+              of{" "}
+              <strong className="font-mono font-semibold tabular-nums text-text-primary">
+                {formatLeadSequenceNumber(totalCount || 0)}
+              </strong>{" "}
+              numbered records
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -1608,6 +2099,7 @@ export function LeadsDatabaseView({
                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
                   {stageRows.map((r) => {
                     const msgStatus = r.messageStatus || "not_messaged";
+                    const numStr = r.displayNumber || r.formattedSequenceNumber || "001";
                     return (
                       <div
                         key={r.id}
@@ -1615,9 +2107,14 @@ export function LeadsDatabaseView({
                         className="p-3 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border cursor-pointer transition space-y-2"
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <span className="font-sans font-semibold text-xs text-text-primary">
-                            {r.name}
-                          </span>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-mono font-bold text-[10px] px-1.5 py-0.5 rounded bg-accent/15 text-accent tabular-nums shrink-0">
+                              #{numStr}
+                            </span>
+                            <span className="font-sans font-semibold text-xs text-text-primary truncate">
+                              {r.name}
+                            </span>
+                          </div>
                           <div className="flex items-center gap-1">
                             {r.effectiveScore !== null && (
                               <span className="px-1.5 py-0.5 rounded bg-status-success/15 text-status-success font-heading font-semibold tabular-nums text-[10px]">
@@ -1689,9 +2186,12 @@ export function LeadsDatabaseView({
       {/* VIEW 3: CARDS GRID VIEW */}
       {viewMode === "cards" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {rows.map((r) => {
+          {rows.map((r, idx) => {
             const msgStatus = r.messageStatus || "not_messaged";
             const cardUrls = resolveLeadWebPages(r);
+            const numStr =
+              r.displayNumber ||
+              formatLeadSequenceNumber((page - 1) * pageSize + idx + 1);
             return (
               <div
                 key={r.id}
@@ -1700,12 +2200,17 @@ export function LeadsDatabaseView({
               >
                 <div className="space-y-2.5">
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-heading font-semibold text-sm text-text-primary">
-                        {r.name}
-                      </h3>
-                      <div className="text-xs font-mono text-accent">
-                        {cardUrls.displayDomain || "Directory-only record"}
+                    <div className="flex items-start gap-2.5">
+                      <span className="font-mono font-bold text-xs px-2 py-1 rounded-lg bg-accent/15 border border-accent/30 text-accent tabular-nums">
+                        #{numStr}
+                      </span>
+                      <div>
+                        <h3 className="font-heading font-semibold text-sm text-text-primary">
+                          {r.name}
+                        </h3>
+                        <div className="text-xs font-mono text-accent">
+                          {cardUrls.displayDomain || "Directory-only record"}
+                        </div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
