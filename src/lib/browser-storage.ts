@@ -8,6 +8,10 @@ import {
   calculateLeadScore,
   sanitizeSpreadsheetCell,
 } from "./domain-utils";
+import {
+  deduplicateAndDisambiguateWorkspaceState,
+  areLeadsContentIdentical,
+} from "./deduplicate-leads";
 import { DEFAULT_SCORING_CONFIG, type ScoringConfigJSON } from "@/db/schema";
 
 export const LOCAL_STORAGE_DB_KEY = "jayant_crm_local_db_v2";
@@ -220,18 +224,16 @@ function normalizeLeadNumberingAndDays(state: LocalWorkspaceDB): boolean {
 
   const todayIsoDate = new Date().toISOString().slice(0, 10);
 
-  // Order oldest -> newest so sequential numbers 001, 002, ... stay stable
-  const chronological = [...state.organizations].reverse();
   const perDayCounters: Record<string, number> = {};
   let maxGlobalSeq = 0;
 
-  for (const org of chronological) {
+  for (const org of state.organizations) {
     if (typeof org.sequenceNumber === "number" && org.sequenceNumber > maxGlobalSeq) {
       maxGlobalSeq = org.sequenceNumber;
     }
   }
 
-  for (const org of chronological) {
+  for (const org of state.organizations) {
     const resolvedDay =
       org.dayKey ||
       org.discoveryDate ||
@@ -261,6 +263,11 @@ function normalizeLeadNumberingAndDays(state: LocalWorkspaceDB): boolean {
       org.categories = org.industry ? [org.industry] : [];
       mutated = true;
     }
+  }
+
+  const dedupReport = deduplicateAndDisambiguateWorkspaceState(state);
+  if (dedupReport.erasedCount > 0 || dedupReport.disambiguatedCount > 0) {
+    mutated = true;
   }
 
   return mutated;
@@ -662,9 +669,14 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
   filtered.sort((a, b) => {
     let cmp = 0;
     if (sortBy === "sequenceNumber") {
-      const seqA = day ? (a.daySequenceNumber ?? a.sequenceNumber ?? 1) : (a.sequenceNumber ?? 1);
-      const seqB = day ? (b.daySequenceNumber ?? b.sequenceNumber ?? 1) : (b.sequenceNumber ?? 1);
+      const seqA =
+        a.baseNumber ?? (day ? (a.daySequenceNumber ?? a.sequenceNumber ?? 1) : (a.sequenceNumber ?? 1));
+      const seqB =
+        b.baseNumber ?? (day ? (b.daySequenceNumber ?? b.sequenceNumber ?? 1) : (b.sequenceNumber ?? 1));
       cmp = seqA - seqB;
+      if (cmp === 0) {
+        cmp = String(a.codeSuffix || "").localeCompare(String(b.codeSuffix || ""));
+      }
     } else if (sortBy === "name") {
       cmp = (a.name || "").localeCompare(b.name || "");
     } else if (sortBy === "score") {
@@ -682,15 +694,25 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  // Number every lead in the sorted list sequentially: 001, 002, 003 ... till Infinity
+  // Number every lead in the sorted list sequentially: 001, 002, 003 ... till Infinity,
+  // or 001A, 001B, 001C when numbers are duplicated across leads with different content!
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const numberedFiltered: Array<Record<string, any>> = filtered.map((item, idx) => ({
-    ...item,
-    sortedRank: idx + 1,
-    displayNumber: formatLeadSequenceNumber(idx + 1),
-    formattedSequenceNumber: formatLeadSequenceNumber(item.sequenceNumber || idx + 1),
-    formattedDaySequenceNumber: formatLeadSequenceNumber(item.daySequenceNumber || idx + 1),
-  }));
+  const numberedFiltered: Array<Record<string, any>> = filtered.map((item, idx) => {
+    const suffix = item.codeSuffix ? String(item.codeSuffix) : "";
+    const displayNum =
+      sortBy === "sequenceNumber" && item.sequenceCode
+        ? String(item.sequenceCode)
+        : `${formatLeadSequenceNumber(idx + 1)}${suffix}`;
+    return {
+      ...item,
+      sortedRank: idx + 1,
+      displayNumber: displayNum,
+      formattedSequenceNumber:
+        item.sequenceCode || `${formatLeadSequenceNumber(item.sequenceNumber || idx + 1)}${suffix}`,
+      formattedDaySequenceNumber:
+        item.sequenceCode || `${formatLeadSequenceNumber(item.daySequenceNumber || idx + 1)}${suffix}`,
+    };
+  });
 
   const totalCount = numberedFiltered.length;
   const offset = (page - 1) * pageSize;
@@ -1050,9 +1072,16 @@ function previewLocalSpreadsheetImport(
     const matchedByDom = mapped.normalizedDomain
       ? existingByDomain.get(mapped.normalizedDomain)
       : undefined;
-    const matchedByExt = mapped.externalId
+    const rawMatchedByExt = mapped.externalId
       ? existingByExtId.get(String(mapped.externalId).toLowerCase())
       : undefined;
+    // Only treat matchedByExt as a duplicate if the content (company name / domain) also matches!
+    // If the number/externalId is duplicated but the content (company name & details) is different,
+    // import it as a new lead so it gets disambiguated with A, B, C!
+    const matchedByExt =
+      rawMatchedByExt && areLeadsContentIdentical(rawMatchedByExt, mapped).isDuplicate
+        ? rawMatchedByExt
+        : undefined;
     const ncKey = `${normalizeOrganizationName(mapped.name)}|${(mapped.country || "").toLowerCase()}`;
     const matchedByName = existingByNameCountry.get(ncKey);
 
@@ -1757,6 +1786,21 @@ export function installLocalBrowserStorageInterceptor(): void {
             }
             saveLocalBrowserDB(state);
             return jsonResponse({ ok: true, dayKey, label });
+          }
+
+          case "deduplicate_and_disambiguate_leads": {
+            const report = deduplicateAndDisambiguateWorkspaceState(state);
+            normalizeLeadNumberingAndDays(state);
+            state.activities.unshift({
+              id: uid("act"),
+              workspaceId: DEFAULT_WORKSPACE_ID,
+              actorOrigin: "user",
+              activityType: "deduplication_script",
+              title: `Deduplication & Code Script: ${report.erasedCount} duplicate(s) erased, ${report.disambiguatedCount} number collision(s) assigned A/B/C codes`,
+              createdAt: nowIso,
+            });
+            saveLocalBrowserDB(state);
+            return jsonResponse({ ok: true, report });
           }
 
           case "delete_category": {
@@ -2614,6 +2658,7 @@ export function installLocalBrowserStorageInterceptor(): void {
           if (newlyCreatedOrgs.length > 0) {
             state.organizations = [...newlyCreatedOrgs, ...state.organizations];
           }
+          normalizeLeadNumberingAndDays(state);
 
           const batchRecord = {
             id: newBatchId,
