@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "seed": "tsx src/scripts/seed.ts",
-    "generate:fixture": "tsx src/scripts/generate-ledger-fixture.ts"
+    "generate:fixture": "tsx src/scripts/generate-ledger-fixture.ts",
+    "deduplicate": "tsx src/scripts/deduplicate-leads.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.2.17",
