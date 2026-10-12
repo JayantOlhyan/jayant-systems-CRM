@@ -62,6 +62,7 @@ import {
 export type NavSection =
   | "dashboard"
   | "leads"
+  | "qualified_leads"
   | "companies"
   | "contacts"
   | "collections"
@@ -320,6 +321,12 @@ export function CrmWorkspaceShell({
   // Dashboard Metrics (Section 6.2 — 100% live counts from Local Browser Storage)
   const todayStr = new Date().toISOString().split("T")[0];
   const totalLeadsCount = organizations.length;
+  const qualifiedLeadsCount = organizations.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (o: any) =>
+      (o.qualificationDecision || "").toLowerCase() === "qualified" ||
+      o.primaryStageId === "stg_qualified"
+  ).length;
   const indiaLeadsCount = organizations.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (o: any) =>
@@ -429,6 +436,12 @@ export function CrmWorkspaceShell({
                 icon: Database,
                 badge: totalLeadsCount,
               },
+              {
+                id: "qualified_leads",
+                label: "Qualified Leads",
+                icon: CheckCircle2,
+                badge: qualifiedLeadsCount,
+              },
               { id: "companies", label: "Companies", icon: Building2 },
               { id: "contacts", label: "Contacts", icon: Users, badge: contacts.length },
               {
@@ -447,7 +460,11 @@ export function CrmWorkspaceShell({
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    if (item.id === "leads" || item.id === "companies") {
+                    if (
+                      item.id === "leads" ||
+                      item.id === "qualified_leads" ||
+                      item.id === "companies"
+                    ) {
                       setSelectedCollectionId(undefined);
                     }
                     setActiveNav(item.id as NavSection);
@@ -1178,15 +1195,17 @@ export function CrmWorkspaceShell({
           )}
 
           {/* =================================================================
-              SECTION 2: ALL LEADS / COMPANIES / COLLECTION DETAIL TABLE
+              SECTION 2: ALL LEADS / QUALIFIED LEADS / COMPANIES / COLLECTION DETAIL TABLE
               ================================================================= */}
           {(activeNav === "leads" ||
+            activeNav === "qualified_leads" ||
             activeNav === "companies" ||
             activeNav === "collection_detail") && (
             <LeadsDatabaseView
               collectionId={
                 activeNav === "collection_detail" ? selectedCollectionId : undefined
               }
+              onlyQualified={activeNav === "qualified_leads"}
               collections={collections}
               stages={stages}
               categories={categories}
