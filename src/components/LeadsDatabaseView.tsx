@@ -38,6 +38,7 @@ import { resolveLeadWebPages } from "./LeadProfileModal";
 
 interface LeadsDatabaseViewProps {
   collectionId?: string;
+  onlyQualified?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   collections: any[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -54,6 +55,7 @@ interface LeadsDatabaseViewProps {
 
 export function LeadsDatabaseView({
   collectionId,
+  onlyQualified = false,
   collections,
   stages,
   categories,
@@ -143,7 +145,8 @@ export function LeadsDatabaseView({
       if (categoryFilter) sp.set("category", categoryFilter);
       if (stageFilter) sp.set("stageId", stageFilter);
       if (verificationFilter) sp.set("verificationLevel", verificationFilter);
-      if (qualificationFilter) sp.set("qualificationDecision", qualificationFilter);
+      const effectiveQualification = onlyQualified ? "qualified" : qualificationFilter;
+      if (effectiveQualification) sp.set("qualificationDecision", effectiveQualification);
       if (minScoreFilter !== "") sp.set("minScore", minScoreFilter);
       if (warningsOnly) sp.set("hasWarning", "true");
 
@@ -165,6 +168,7 @@ export function LeadsDatabaseView({
     sortBy,
     sortDir,
     collectionId,
+    onlyQualified,
     selectedDay,
     search,
     marketFilter,
@@ -178,12 +182,16 @@ export function LeadsDatabaseView({
   ]);
 
   useEffect(() => {
+    setPage(1);
+  }, [onlyQualified, collectionId]);
+
+  useEffect(() => {
     fetchLeads();
   }, [fetchLeads]);
 
   useEffect(() => {
     setSwipeIndex(0);
-  }, [rows.length, collectionId, selectedDay, categoryFilter, search, marketFilter]);
+  }, [rows.length, collectionId, onlyQualified, selectedDay, categoryFilter, search, marketFilter]);
 
   async function handleDirectFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -503,6 +511,43 @@ export function LeadsDatabaseView({
     notify("Stage updated", "success");
   }
 
+  async function handleInlineQualificationChange(
+    orgId: string,
+    orgName: string,
+    nextQualification: string,
+    e?: React.MouseEvent
+  ) {
+    if (e) e.stopPropagation();
+    const isQualifying = nextQualification.toLowerCase() === "qualified";
+    await fetch("/api/workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "inline_update_lead",
+        payload: {
+          id: orgId,
+          updates: isQualifying
+            ? {
+                qualificationDecision: "qualified",
+                outreachApproval: "approved",
+                primaryStageId: "stg_qualified",
+              }
+            : {
+                qualificationDecision: nextQualification,
+              },
+        },
+      }),
+    });
+    await fetchLeads();
+    await onMutated();
+    notify(
+      isQualifying
+        ? `Qualified ${orgName} — added to Qualified Leads`
+        : `Updated qualification for ${orgName} to ${nextQualification}`,
+      isQualifying ? "success" : "info"
+    );
+  }
+
   async function handleBulkOperation(
     operation:
       | "change_stage"
@@ -589,16 +634,28 @@ export function LeadsDatabaseView({
         <div className="flex items-center gap-3">
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-heading font-bold shadow-sm"
-            style={{ backgroundColor: activeCol?.color || "#7958F5" }}
+            style={{
+              backgroundColor: onlyQualified
+                ? "#10B981"
+                : activeCol?.color || "#7958F5",
+            }}
           >
-            {activeCol ? activeCol.name.slice(0, 2).toUpperCase() : "AL"}
+            {onlyQualified
+              ? "QL"
+              : activeCol
+              ? activeCol.name.slice(0, 2).toUpperCase()
+              : "AL"}
           </div>
           <div>
             <h1 className="text-xl font-heading font-bold text-text-primary">
-              {activeCol ? activeCol.name : "All Leads Database"}
+              {onlyQualified
+                ? "Qualified Leads"
+                : activeCol
+                ? activeCol.name
+                : "All Leads Database"}
             </h1>
             <p className="text-xs text-text-secondary font-mono">
-              {totalCount} leads numbered 001 →{" "}
+              {totalCount} {onlyQualified ? "qualified leads" : "leads"} numbered 001 →{" "}
               {totalCount > 0 ? formatLeadSequenceNumber(totalCount) : "∞"} •{" "}
               {selectedDay
                 ? `Showing Day ${activeDayObj?.formattedDayNumber || "001"} (${selectedDay})`
@@ -2046,8 +2103,35 @@ export function LeadsDatabaseView({
                         )}
 
                         {visibleCols.qualification && (
-                          <td className="py-2 px-3 font-mono text-[11px] text-text-secondary">
-                            {r.qualificationDecision}
+                          <td
+                            className="py-2 px-3"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <select
+                              aria-label={`Qualification status for ${r.name}`}
+                              value={
+                                r.primaryStageId === "stg_qualified" &&
+                                (r.qualificationDecision || "").toLowerCase() !== "qualified"
+                                  ? "qualified"
+                                  : r.qualificationDecision || "not reviewed"
+                              }
+                              onChange={(e) =>
+                                handleInlineQualificationChange(r.id, r.name, e.target.value)
+                              }
+                              className={`border rounded-md px-2 py-1 text-[11px] font-mono font-medium ${
+                                (r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                                r.primaryStageId === "stg_qualified"
+                                  ? "bg-status-success/15 border-status-success/40 text-status-success"
+                                  : (r.qualificationDecision || "").toLowerCase() === "disqualified"
+                                  ? "bg-status-error/15 border-status-error/40 text-status-error"
+                                  : "bg-app-secondary border-app-border text-text-secondary"
+                              }`}
+                            >
+                              <option value="not reviewed">not reviewed</option>
+                              <option value="qualified">qualified</option>
+                              <option value="needs research">needs research</option>
+                              <option value="disqualified">disqualified</option>
+                            </select>
                           </td>
                         )}
 
@@ -2079,6 +2163,33 @@ export function LeadsDatabaseView({
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) =>
+                                  handleInlineQualificationChange(
+                                    r.id,
+                                    r.name,
+                                    (r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                                      r.primaryStageId === "stg_qualified"
+                                      ? "not reviewed"
+                                      : "qualified",
+                                    e
+                                  )
+                                }
+                                title="Click to toggle Qualified Lead status"
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition ${
+                                  (r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                                  r.primaryStageId === "stg_qualified"
+                                    ? "bg-status-success/20 border-status-success/40 text-status-success font-semibold"
+                                    : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                                }`}
+                              >
+                                {(r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                                r.primaryStageId === "stg_qualified"
+                                  ? "✓ Qualified"
+                                  : "Qualify"}
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={(e) =>
@@ -2412,6 +2523,31 @@ export function LeadsDatabaseView({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) =>
+                          handleInlineQualificationChange(
+                            r.id,
+                            r.name,
+                            (r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                              r.primaryStageId === "stg_qualified"
+                              ? "not reviewed"
+                              : "qualified",
+                            e
+                          )
+                        }
+                        className={`px-2 py-1 rounded-md font-medium border ${
+                          (r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                          r.primaryStageId === "stg_qualified"
+                            ? "bg-status-success/20 border-status-success/40 text-status-success font-semibold"
+                            : "bg-app-secondary border-app-border text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        {(r.qualificationDecision || "").toLowerCase() === "qualified" ||
+                        r.primaryStageId === "stg_qualified"
+                          ? "✓ Qualified"
+                          : "Qualify"}
+                      </button>
                       <button
                         type="button"
                         onClick={(e) =>
