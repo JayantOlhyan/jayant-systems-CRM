@@ -1,44 +1,94 @@
-# JAYANT CRM — Personal Lead Intelligence & Relationship Management Workspace
+# Jayant CRM
 
-A private, customizable, production-grade CRM and Lead Intelligence Workspace engineered for **Jayant Web & AI Systems** (Web Development, AI Systems, Automation, and Digital Solutions Agency).
-
----
-
-## 1. Product Overview
-
-**JAYANT CRM** is a single-user-first, high-density agency operating workspace designed to replace fragmented spreadsheets with a structured, customizable relational database while preserving spreadsheet speed and provenance.
-
-### Core Capabilities
-- **Unlimited Custom Collections**: Organize leads into independent collections (`Global E-Commerce Leads`, `India D2C Brands`, `Schools & Education`, `AI Automation Prospects`, etc.), each with its own categories, custom fields, default view, and weighted scoring formula.
-- **Shared Company Identity vs. Scoped Collection Membership**: A company (`Organization`) exists once globally by canonical domain (`tldts` public-suffix-aware normalization) while belonging to one or more collections with collection-specific categories, stages, custom field values, and scores.
-- **Multi-Sheet Spreadsheet Import Engine (`.xlsx` & `.csv`)**:
-  - Automatically inspects workbooks with multiple sheets (`Leads`, `Run Log`, `Do Not Contact`).
-  - Imports `Leads` with intelligent column mapping, saved mapping templates, and duplicate policies (`fill_blanks`, `keep_existing`, `use_imported`, `skip_existing`).
-  - Records `Run Log` rows as batch provenance metadata rather than lead records.
-  - Syncs `Do Not Contact` sheets into the workspace-wide **Contact Suppression Registry**.
-  - Preserves raw source rows in `source_records` and flags anomalous URL values (such as `49` or `sent` in `Contact Evidence URL`) without fabricating clickable URLs or false outreach history.
-  - Supports safe **Import Batch Rollback** that removes unmodified batch records while preserving any leads where user notes, tasks, opportunities, or manual scores were added.
-- **18 Custom Field Types**: Text, Long Text, Number, Currency, Percentage, Boolean, Single Select, Multi Select, Date, URL, Email, Phone, Rating, Score, Status, Tag List, JSON Metadata, and Relation.
-- **Configurable Opportunity Scoring**: Per-collection weighted scoring dimensions (`0–100`) with missing-value policies, plus manual score overrides with audit logging.
-- **8-Tab Lead & Company Profile**: Overview, Contacts, Opportunities (multiple deals per company), Notes & Research, Tasks & Follow-ups, Website & Socials, Attachments, and Source Data Provenance.
-- **Kanban Pipelines, Tasks, Follow-ups, Calendar, Reference Library, Content Ideas (`[Create Content Idea From Lead]`), Real Analytics, and Command Palette (`Cmd/Ctrl + K`)**.
+**Jayant CRM** is a lead intelligence and relationship management workspace built for **Jayant Web & AI Systems**. It combines spreadsheet-speed lead triage with structured collections, daily spreadsheet tracking, in-tab website previews, and outreach tracking.
 
 ---
 
-## 2. Architecture & Technology Stack
+## Key Features
 
-- **Framework**: Next.js 14 (App Router) + React 18 + TypeScript
-- **Styling**: Tailwind CSS + CSS Custom Properties for Dark Mode (`#0B0D12` primary reference theme) and Light Mode (`Manrope`, `Inter`, and `IBM Plex Mono` typography)
-- **Database & ORM**:
-  - **PostgreSQL** via **Drizzle ORM** ([`src/db/schema.ts`](file:///Users/jayantolhyan/Desktop/my%20projects/agency/CRM%20System/src/db/schema.ts))
-  - Supports external PostgreSQL / Supabase via `DATABASE_URL` (`pg` driver) **and** zero-config embedded PostgreSQL 16 (`@electric-sql/pglite` persisted in `./data/pgdata`) out of the box.
-- **Spreadsheet Engine**: `ExcelJS` (multi-sheet `.xlsx` parsing and generation) + `PapaParse` (`.csv` parsing and export with formula-injection sanitization)
-- **Domain Normalization**: `tldts` (ICANN + multi-tenant public suffix extraction)
-- **Testing**: `Vitest` unit, integration, and end-to-end workflow test suite ([`src/__tests__/crm-core.test.ts`](file:///Users/jayantolhyan/Desktop/my%20projects/agency/CRM%20System/src/__tests__/crm-core.test.ts))
+### 1. All Leads & Qualified Leads Views
+- **Workspace Sidebar Navigation**: Dedicated **All Leads** and **Qualified Leads** sections with live record counts.
+- **1-Click Qualification**: Qualify or unqualify any lead from the table, cards, swipe deck, or pipeline dropdown. Qualifying a lead automatically synchronizes its qualification decision (`qualified`), outreach approval (`approved`), and pipeline stage (`Qualified`).
+- **Flexible Pagination**: View **50**, **100**, or **Unlimited** records per page across all long lists (All Leads, Qualified Leads, Contacts, Suppression Registry, and Activity Timeline).
+
+### 2. Daily Spreadsheets & Sequential Numbering (`001` → `∞`)
+- **Daily Spreadsheet Selector**: Group imported spreadsheets by day (`Day #001`, `Day #002`, ...) or view all days together.
+- **Sequential Numbering**: Every lead, daily batch, and category is numbered sequentially (`001`, `002`, `003`, ...) using tabular numerals.
+- **In-Place Category Storage**: Create categories inside the Leads view and assign single or bulk-selected leads to any category.
+
+### 3. Duplicate Erasure & Number Collision Coding (`001A`, `001B`, `001C`)
+- **Exact Duplicate Removal**: The built-in deduplication script detects leads with identical content (matching normalized domain + organization name + contact details) and removes the duplicate rows.
+- **Number Collision Disambiguation**: When two distinct leads share the same sequence number (`001`) but have different company names or details, both records are kept and assigned alphabetic suffix codes (`001A`, `001B`, `001C`, ..., `001Z`, `001AA`).
+
+### 4. Five Interactive Lead Views
+- **Table View**: High-density spreadsheet table with inline stage, qualification, and category selectors, bulk actions, and customizable columns.
+- **Swipe Deck View**: Centered card triage mode for reviewing leads one by one (`Pass`, `Qualify & Approve`, `Message Sent`, `Follow-up`, `Replied`, and `Bookmark`).
+- **Cards Grid**: Visual card layout with quick outreach and qualification actions.
+- **Kanban Board**: Stage-by-stage pipeline board (`New`, `Reviewed`, `Qualified`, `Contacted`, `Proposal`, `Won`, `Lost`).
+- **Geography View**: Lead distribution grouped by country and market (`India` vs. `International`).
+
+### 5. In-Tab Website & Contact Page Preview
+- Every lead resolves both a **Website Page** and a **Contact Page** URL.
+- Clicking **Website** or **Contact** opens an in-tab split preview (with a proxied live site reader and extracted contact paths) so you can inspect sites without leaving the CRM tab.
+
+### 6. Outreach Operations & Design Inspirations
+- **Quick Message Operations**: Log outreach states (`Not Messaged` → `Message Sent` → `Follow-up Sent` → `Replied`) with a single click from any view.
+- **Design Inspirations Library**: Bookmark any lead's website into the **Design Inspirations** library (`References & Content`) for future design reference.
+
+### 7. Zero Dummy Data & Local-First Storage
+- **No Pre-Filled Dummy Data**: Starts with a clean workspace ready for your real `.xlsx` and `.csv` spreadsheets.
+- **100% Local Browser Persistence**: Stores workspace state in `localStorage` and `IndexedDB` out of the box, with full `.xlsx`, `.csv`, and `.json` workspace backup and restore.
+- **Optional PostgreSQL Backend**: Includes a complete Drizzle ORM schema (`src/db/schema.ts`) supporting external PostgreSQL (`DATABASE_URL`) or embedded PGlite (`@electric-sql/pglite`).
 
 ---
 
-## 3. Local Setup & Commands
+## Architecture Overview
+
+```mermaid
+flowchart LR
+  subgraph Client["Next.js 14 App Router UI"]
+    Shell["CrmWorkspaceShell"]
+    Leads["LeadsDatabaseView\n(Table / Swipe / Cards / Kanban / Map)"]
+    Profile["LeadProfileModal\n(8-Tab Record Drawer)"]
+    Preview["In-Tab Website & Contact Preview"]
+    Imports["ImportCenterView\n(.xlsx & .csv)"]
+  end
+
+  subgraph Engine["Core Services (src/lib)"]
+    Storage["Local Browser DB\n(localStorage + IndexedDB)"]
+    Dedup["Deduplication & Collision Coder\n(001A / 001B / 001C)"]
+    Scoring["Weighted Scoring Engine\n(0-100)"]
+    Proxy["Site Preview Proxy\n(/api/site-preview)"]
+  end
+
+  Shell --> Leads
+  Shell --> Profile
+  Shell --> Imports
+  Leads --> Preview
+  Preview --> Proxy
+  Leads --> Storage
+  Imports --> Storage
+  Storage --> Dedup
+  Storage --> Scoring
+```
+
+---
+
+## Tech Stack & Typography System
+
+| Layer | Technology |
+| :--- | :--- |
+| **Framework** | Next.js 14 (App Router), React 18, TypeScript |
+| **Styling** | Tailwind CSS + CSS custom properties (Dark `#0B0D12` & Light themes) |
+| **Typography** | `next/font/google`: **Inter** (UI, tables, forms, buttons), **Manrope** (page titles, collection headings, KPI metrics), **IBM Plex Mono** (IDs, domains, sequence codes with `tabular-nums`) |
+| **Spreadsheets** | `ExcelJS` (multi-sheet `.xlsx` import/export) + `PapaParse` (`.csv` import/export with formula-injection sanitization) |
+| **Domain Parsing** | `tldts` (ICANN & multi-tenant public suffix normalization) |
+| **Storage / DB** | Browser `localStorage` + `IndexedDB` by default; Drizzle ORM + PostgreSQL / PGlite (`src/db/schema.ts`) |
+| **Testing** | Vitest (`src/__tests__/crm-core.test.ts`) |
+
+---
+
+## Getting Started
 
 ### Prerequisites
 - Node.js `>= 18.18.0`
@@ -49,68 +99,71 @@ A private, customizable, production-grade CRM and Lead Intelligence Workspace en
 npm install
 ```
 
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env` (optional for local development; sensible defaults are preconfigured):
+### 2. Start the Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### 3. Optional Environment Variables
+If you want to connect an external PostgreSQL database or customize operator credentials, copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
 
 | Variable | Description | Default |
 | :--- | :--- | :--- |
-| `DATABASE_URL` | Optional PostgreSQL / Supabase connection URI. When omitted, uses persistent local PostgreSQL (`./data/pgdata`). | *(Embedded PGlite)* |
-| `PGLITE_DATA_DIR` | Directory for local embedded PostgreSQL data persistence. | `./data/pgdata` |
-| `CRM_ADMIN_EMAIL` | Single-user operator login email. | `jayant@jayant.systems` |
-| `CRM_ADMIN_PASSWORD` | Single-user operator login password. | `jayant-crm-2026` |
-| `CRM_SESSION_SECRET` | HMAC-SHA256 secret used to sign HTTP-only session cookies. | *(Built-in dev secret)* |
-
-### 3. Generate the 200-Lead Workbook Fixture & Seed the Workspace
-```bash
-npm run generate:fixture
-npm run seed
-```
-- Generates `fixtures/Jayant Solution — Global E-Commerce Lead Ledger (2026).xlsx` (containing the `Leads` sheet with 200 leads across 18 columns, `Run Log` provenance sheet, and `Do Not Contact` exclusion sheet).
-- Seeds the workspace idempotently with all 200 leads, starter collections, pipeline stages, and sample tasks/opportunities/references.
-
-### 4. Start the Development Server
-```bash
-npm run dev
-```
-Open `http://localhost:3000` in your browser.
-
-### 5. Run Typecheck, Automated Tests, and Production Build
-```bash
-npm run lint     # Runs tsc --noEmit
-npm test         # Runs Vitest unit + integration + Workflows A-F suite
-npm run build    # Builds production Next.js bundle
-```
+| `DATABASE_URL` | Optional PostgreSQL / Supabase connection URI | *(Local persistence)* |
+| `PGLITE_DATA_DIR` | Directory for local embedded PostgreSQL data | `./data/pgdata` |
+| `CRM_ADMIN_EMAIL` | Operator login email | `jayant@jayant.systems` |
+| `CRM_ADMIN_PASSWORD` | Operator login password | `jayant-crm-2026` |
+| `CRM_SESSION_SECRET` | HMAC-SHA256 secret for session cookies | *(Built-in dev secret)* |
 
 ---
 
-## 4. Importing `Global E-Commerce Lead Ledger (2026).xlsx`
+## Scripts & Testing
 
-1. Navigate to **DATA → Import Center** (`/imports`) or click **Import Spreadsheet** in the top bar.
-2. Upload `fixtures/Jayant Solution — Global E-Commerce Lead Ledger (2026).xlsx` (or click **Load 200-Lead Global E-Commerce Ledger Fixture**).
-3. **Workbook Sheet Inspection**:
-   - `Leads` (200 rows, 18 columns: `100 India`, `100 International`, `192 site description`, `8 directory listing only`) is selected as the primary import sheet.
-   - `Run Log` is automatically detected and stored as batch provenance metadata.
-   - `Do Not Contact` is automatically detected and synced into the **Contact Suppression Registry**.
-4. **Governance & Anomaly Preservation**:
-   - Source `Status = candidate` is preserved in `sourceLeadStatus` while CRM Pipeline Stage starts cleanly at `New`.
-   - `Qualification Decision = not reviewed`, `Outreach Approval = not approved`, and `Opt-Out = unknown` are preserved accurately.
-   - Anomalous values in `Contact Evidence URL` (`49` on `ECOM-IN-049` and `sent` on `ECOM-INTL-012`) are flagged with validation warnings, stored in `contactEvidenceUrl` with `contactEvidenceValid = false`, and **never** rendered as broken links or false outreach events.
+| Command | Description |
+| :--- | :--- |
+| `npm run dev` | Start the Next.js development server on port `3000` |
+| `npm run build` | Build the production Next.js bundle |
+| `npm start` | Run the production server |
+| `npm run lint` | Run TypeScript type checking (`tsc --noEmit`) |
+| `npm test` | Run the Vitest test suite (`crm-core.test.ts`) |
 
 ---
 
-## 5. Creating Custom Collections, Fields & Scoring Rules
+## Project Structure
 
-1. Navigate to **SYSTEM → Collection Settings** (`/collection-settings`) or click **New Collection**.
-2. Specify the collection name, icon, accent color, default view (`Table`, `Kanban`, `Cards`), custom categories, and custom fields (any of the 18 supported field types).
-3. Configure collection-specific **Opportunity Scoring Rules** (`0–100` weighted dimensions summing to `100%`, High/Medium thresholds, and missing-value policy).
-4. Any company can belong to multiple collections simultaneously without duplicating the underlying organization record.
-
----
-
-## 6. Backup, Export & Data Management
-
-- **Export Center (`/exports`)**: Export filtered leads, collections, or full workspace records to `.xlsx` or formula-sanitized `.csv`.
-- **Full JSON Workspace Backup**: Download a complete relational JSON snapshot of all collections, organizations, contacts, opportunities, notes, tasks, references, content ideas, and import provenance from **Export Center** or **Settings → Data Management**.
+```text
+├── src/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── auth/           # Session authentication route
+│   │   │   ├── export/         # CSV, XLSX, and JSON export endpoint
+│   │   │   ├── import/         # Multi-sheet spreadsheet inspection & import
+│   │   │   ├── site-preview/   # In-tab website & contact page proxy
+│   │   │   └── workspace/      # Workspace state & mutation API
+│   │   ├── globals.css         # Theme variables & typography rules
+│   │   ├── layout.tsx          # Inter, Manrope & IBM Plex Mono font setup
+│   │   └── page.tsx            # Root workspace entry
+│   ├── components/
+│   │   ├── CrmWorkspaceShell.tsx       # Sidebar navigation, dashboard & command palette
+│   │   ├── LeadsDatabaseView.tsx       # All Leads / Qualified Leads (Table, Swipe, Cards, Kanban, Map)
+│   │   ├── LeadProfileModal.tsx        # 8-tab lead profile drawer & in-tab site preview
+│   │   ├── ImportCenterView.tsx        # Multi-sheet .xlsx / .csv import wizard
+│   │   ├── CollectionSettingsView.tsx  # Custom collections, fields & scoring rules
+│   │   └── WorkflowAndLibraryViews.tsx # Pipelines, tasks, contacts, inspirations & analytics
+│   ├── db/
+│   │   ├── index.ts            # Drizzle ORM / PGlite / pg connection
+│   │   └── schema.ts           # Relational schema definitions
+│   ├── lib/
+│   │   ├── browser-storage.ts  # Local browser DB, pagination, deduplication & 001A/B/C coding
+│   │   ├── crm-service.ts      # Server-side CRM queries & mutations
+│   │   ├── domain-utils.ts     # Domain normalization, URL validation & sequence suffix helpers
+│   │   ├── scoring.ts          # Weighted 0-100 lead scoring engine
+│   │   └── spreadsheet.ts      # ExcelJS & PapaParse multi-sheet parser/exporter
+│   └── __tests__/
+│       └── crm-core.test.ts    # Unit & end-to-end workflow tests
+└── package.json
+```
