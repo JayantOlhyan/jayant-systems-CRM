@@ -316,10 +316,12 @@ export async function queryLeadsPaginated(
   }
 
   if (params.qualificationDecision) {
-    filtered = filtered.filter(
-      (o) =>
-        (o.qualificationDecision || "").toLowerCase() ===
-        params.qualificationDecision!.toLowerCase()
+    const qLow = params.qualificationDecision.toLowerCase();
+    filtered = filtered.filter((o) =>
+      qLow === "qualified"
+        ? (o.qualificationDecision || "").toLowerCase() === "qualified" ||
+          o.primaryStageId === "stg_qualified"
+        : (o.qualificationDecision || "").toLowerCase() === qLow
     );
   }
 
