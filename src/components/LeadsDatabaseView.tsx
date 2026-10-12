@@ -1120,9 +1120,9 @@ export function LeadsDatabaseView({
       </div>
 
       {/* Search & Multi-Filter Controls Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2.5 bg-app-surface border border-app-border rounded-xl p-3">
-        <div className="relative lg:col-span-2">
-          <Search className="w-4 h-4 text-text-muted absolute left-3 top-2.5" />
+      <div className="flex flex-wrap items-center gap-2.5 bg-app-surface border border-app-border rounded-xl p-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="w-4 h-4 text-text-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search #001, company, domain, Lead ID, category, contact..."
@@ -1134,7 +1134,7 @@ export function LeadsDatabaseView({
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="w-full bg-app-secondary border border-app-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-text-primary"
+            className="w-full h-9 bg-app-secondary border border-app-border rounded-lg pl-9 pr-3 text-xs text-text-primary placeholder:text-text-muted"
           />
         </div>
 
@@ -1145,7 +1145,7 @@ export function LeadsDatabaseView({
             setStageFilter(e.target.value);
             setPage(1);
           }}
-          className="bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
+          className="h-9 bg-app-secondary border border-app-border rounded-lg px-3 text-xs text-text-primary min-w-[155px]"
         >
           <option value="">All Pipeline Stages</option>
           {stages.map((s) => (
@@ -1162,7 +1162,7 @@ export function LeadsDatabaseView({
             setVerificationFilter(e.target.value);
             setPage(1);
           }}
-          className="bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
+          className="h-9 bg-app-secondary border border-app-border rounded-lg px-3 text-xs text-text-primary min-w-[165px]"
         >
           <option value="">All Verification Levels</option>
           <option value="site description">Site Description</option>
@@ -1170,48 +1170,50 @@ export function LeadsDatabaseView({
           <option value="manually verified">Manually Verified</option>
         </select>
 
+        {!onlyQualified && (
+          <select
+            aria-label="Filter by Qualification Decision"
+            value={qualificationFilter}
+            onChange={(e) => {
+              setQualificationFilter(e.target.value);
+              setPage(1);
+            }}
+            className="h-9 bg-app-secondary border border-app-border rounded-lg px-3 text-xs text-text-primary min-w-[165px]"
+          >
+            <option value="">All Qualification States</option>
+            <option value="not reviewed">not reviewed</option>
+            <option value="qualified">qualified</option>
+            <option value="needs research">needs research</option>
+            <option value="disqualified">disqualified</option>
+          </select>
+        )}
+
         <select
-          aria-label="Filter by Qualification Decision"
-          value={qualificationFilter}
+          aria-label="Sort Leads"
+          value={`${sortBy}:${sortDir}`}
           onChange={(e) => {
-            setQualificationFilter(e.target.value);
-            setPage(1);
+            const [sb, sd] = e.target.value.split(":");
+            setSortBy(sb as typeof sortBy);
+            setSortDir(sd as typeof sortDir);
           }}
-          className="bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary"
+          className="h-9 bg-app-secondary border border-app-border rounded-lg px-3 text-xs text-text-primary font-mono min-w-[185px]"
         >
-          <option value="">All Qualification States</option>
-          <option value="not reviewed">not reviewed</option>
-          <option value="qualified">qualified</option>
-          <option value="needs research">needs research</option>
-          <option value="disqualified">disqualified</option>
+          <option value="sequenceNumber:asc">Sort: Number (001 → ∞)</option>
+          <option value="sequenceNumber:desc">Sort: Number (∞ → 001)</option>
+          <option value="updatedAt:desc">Sort: Recently Updated</option>
+          <option value="name:asc">Sort: Name (A → Z)</option>
+          <option value="name:desc">Sort: Name (Z → A)</option>
+          <option value="score:desc">Sort: Highest Score</option>
+          <option value="country:asc">Sort: Country (A → Z)</option>
         </select>
 
-        <div className="flex items-center gap-2 lg:col-span-2">
-          <select
-            aria-label="Sort Leads"
-            value={`${sortBy}:${sortDir}`}
-            onChange={(e) => {
-              const [sb, sd] = e.target.value.split(":");
-              setSortBy(sb as typeof sortBy);
-              setSortDir(sd as typeof sortDir);
-            }}
-            className="flex-1 bg-app-secondary border border-app-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary font-mono"
-          >
-            <option value="sequenceNumber:asc">Sort: Number (001 → ∞)</option>
-            <option value="sequenceNumber:desc">Sort: Number (∞ → 001)</option>
-            <option value="updatedAt:desc">Sort: Recently Updated</option>
-            <option value="name:asc">Sort: Name (A → Z)</option>
-            <option value="name:desc">Sort: Name (Z → A)</option>
-            <option value="score:desc">Sort: Highest Score</option>
-            <option value="country:asc">Sort: Country (A → Z)</option>
-          </select>
-
+        <div className="flex items-center gap-2 ml-auto shrink-0">
           <div
-            className="flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg p-1 text-xs font-mono shrink-0"
+            className="h-9 flex items-center gap-1 bg-app-secondary border border-app-border rounded-lg px-1.5 text-xs font-mono shrink-0"
             role="group"
             aria-label="Leads per page"
           >
-            <span className="px-1.5 text-[10px] uppercase text-text-muted hidden xl:inline">
+            <span className="px-1.5 text-[10px] uppercase text-text-muted">
               Per Page:
             </span>
             {(
@@ -1239,38 +1241,54 @@ export function LeadsDatabaseView({
             ))}
           </div>
 
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() => setShowColumnMenu(!showColumnMenu)}
               title="Customize Columns"
-              className="p-2 rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary"
+              aria-label="Customize visible table columns"
+              className="h-9 w-9 inline-flex items-center justify-center rounded-lg bg-app-secondary hover:bg-app-elevated border border-app-border text-text-secondary hover:text-text-primary transition"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
             </button>
             {showColumnMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-app-surface border border-app-border rounded-xl p-3 shadow-xl z-30 space-y-1.5 text-xs">
+              <div className="absolute right-0 mt-2 w-52 bg-app-surface border border-app-border rounded-xl p-3 shadow-xl z-30 space-y-1.5 text-xs">
                 <div className="font-mono text-[10px] uppercase text-text-muted pb-1 border-b border-app-border">
                   Visible Columns
                 </div>
-                {Object.entries(visibleCols).map(([colKey, isVis]) => (
-                  <label
-                    key={colKey}
-                    className="flex items-center gap-2 text-text-primary cursor-pointer py-0.5"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isVis}
-                      onChange={(e) =>
-                        setVisibleCols((prev) => ({
-                          ...prev,
-                          [colKey]: e.target.checked,
-                        }))
-                      }
-                    />
-                    <span className="capitalize">{colKey}</span>
-                  </label>
-                ))}
+                {Object.entries(visibleCols).map(([colKey, isVis]) => {
+                  const colLabels: Record<string, string> = {
+                    number: "Number (001→∞)",
+                    website: "Website & Contact",
+                    country: "Country / Market",
+                    niche: "Category",
+                    verification: "Verification",
+                    score: "Score",
+                    stage: "Pipeline Stage",
+                    qualification: "Qualification",
+                    outreach: "Outreach Approval",
+                    nextAction: "Next Action",
+                    quickActions: "Quick Actions",
+                  };
+                  return (
+                    <label
+                      key={colKey}
+                      className="flex items-center gap-2 text-text-primary cursor-pointer py-0.5"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isVis}
+                        onChange={(e) =>
+                          setVisibleCols((prev) => ({
+                            ...prev,
+                            [colKey]: e.target.checked,
+                          }))
+                        }
+                      />
+                      <span>{colLabels[colKey] || colKey}</span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
