@@ -477,6 +477,16 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     baseCollectionOrgs = baseCollectionOrgs.filter((o) => o.collectionIds.includes(collectionId));
   }
 
+  if (qualificationDecision) {
+    const qLow = qualificationDecision.toLowerCase();
+    baseCollectionOrgs = baseCollectionOrgs.filter((o) =>
+      qLow === "qualified"
+        ? (o.qualificationDecision || "").toLowerCase() === "qualified" ||
+          o.primaryStageId === "stg_qualified"
+        : (o.qualificationDecision || "").toLowerCase() === qLow
+    );
+  }
+
   // Build availableDays summary (numbered 001, 002, 003... till infinity)
   const dayMap = new Map<
     string,
@@ -644,8 +654,12 @@ function queryLocalLeadsPaginated(state: LocalWorkspaceDB, searchParams: URLSear
     );
   }
   if (qualificationDecision) {
-    filtered = filtered.filter(
-      (o) => (o.qualificationDecision || "").toLowerCase() === qualificationDecision.toLowerCase()
+    const qLow = qualificationDecision.toLowerCase();
+    filtered = filtered.filter((o) =>
+      qLow === "qualified"
+        ? (o.qualificationDecision || "").toLowerCase() === "qualified" ||
+          o.primaryStageId === "stg_qualified"
+        : (o.qualificationDecision || "").toLowerCase() === qLow
     );
   }
   if (outreachApproval) {
@@ -1272,16 +1286,46 @@ export function installLocalBrowserStorageInterceptor(): void {
                 });
               }
 
+              const syncedUpdates = { ...updates };
+              if (
+                syncedUpdates.primaryStageId === "stg_qualified" &&
+                !syncedUpdates.qualificationDecision
+              ) {
+                syncedUpdates.qualificationDecision = "qualified";
+              } else if (
+                syncedUpdates.primaryStageId === "stg_disqualified" &&
+                !syncedUpdates.qualificationDecision
+              ) {
+                syncedUpdates.qualificationDecision = "disqualified";
+              } else if (
+                typeof syncedUpdates.qualificationDecision === "string" &&
+                syncedUpdates.qualificationDecision.toLowerCase() === "qualified" &&
+                !syncedUpdates.primaryStageId &&
+                (existing.primaryStageId === "stg_new" || !existing.primaryStageId)
+              ) {
+                syncedUpdates.primaryStageId = "stg_qualified";
+              } else if (
+                typeof syncedUpdates.qualificationDecision === "string" &&
+                syncedUpdates.qualificationDecision.toLowerCase() !== "qualified" &&
+                !syncedUpdates.primaryStageId &&
+                existing.primaryStageId === "stg_qualified"
+              ) {
+                syncedUpdates.primaryStageId =
+                  syncedUpdates.qualificationDecision.toLowerCase() === "disqualified"
+                    ? "stg_disqualified"
+                    : "stg_new";
+              }
+
               state.organizations[idx] = {
                 ...existing,
-                ...updates,
-                name: (updates.name ?? existing.name).trim(),
-                normalizedName: normalizeOrganizationName(updates.name ?? existing.name),
+                ...syncedUpdates,
+                name: (syncedUpdates.name ?? existing.name).trim(),
+                normalizedName: normalizeOrganizationName(syncedUpdates.name ?? existing.name),
                 normalizedDomain: nextWeb ? normalizeDomain(nextWeb) : null,
                 contactEvidenceValid: evCheck.isValid,
                 contactEvidenceWarning: evCheck.warning,
-                customValues: updates.customValues
-                  ? { ...(existing.customValues || {}), ...updates.customValues }
+                customValues: syncedUpdates.customValues
+                  ? { ...(existing.customValues || {}), ...syncedUpdates.customValues }
                   : existing.customValues,
                 updatedAt: nowIso,
               };
@@ -1461,8 +1505,11 @@ export function installLocalBrowserStorageInterceptor(): void {
 
               for (const org of state.organizations) {
                 if (!idSet.has(org.id)) continue;
-                if (operation === "change_stage" && value) org.primaryStageId = value;
-                else if (operation === "add_tag" && value) {
+                if (operation === "change_stage" && value) {
+                  org.primaryStageId = value;
+                  if (value === "stg_qualified") org.qualificationDecision = "qualified";
+                  else if (value === "stg_disqualified") org.qualificationDecision = "disqualified";
+                } else if (operation === "add_tag" && value) {
                   org.tags = Array.from(new Set([...(org.tags || []), String(value).trim()]));
                 } else if (operation === "assign_category" && value) {
                   const catName = String(value).trim();
@@ -1481,6 +1528,19 @@ export function installLocalBrowserStorageInterceptor(): void {
                   org.discoveryDate = dayVal;
                 } else if (operation === "set_qualification" && value) {
                   org.qualificationDecision = value;
+                  if (
+                    String(value).toLowerCase() === "qualified" &&
+                    (!org.primaryStageId || org.primaryStageId === "stg_new")
+                  ) {
+                    org.primaryStageId = "stg_qualified";
+                  } else if (String(value).toLowerCase() === "disqualified") {
+                    org.primaryStageId = "stg_disqualified";
+                  } else if (
+                    String(value).toLowerCase() === "pending" &&
+                    org.primaryStageId === "stg_qualified"
+                  ) {
+                    org.primaryStageId = "stg_new";
+                  }
                 } else if (operation === "archive") {
                   org.archivedAt = nowIso;
                 } else if (operation === "restore") {
